@@ -51,7 +51,7 @@ Returns the placeholder string."
 ;;; Block-level conversions
 
 (defun go-jira-markup--convert-code-blocks (text)
-  "Convert Jira code blocks to Org-mode source blocks and protect them.
+  "Convert Jira code blocks of TEXT to Org-mode source blocks and protect them.
 Handles {code:lang}...{code} and {noformat}...{noformat}."
   ;; Code blocks with language
   (setq text (replace-regexp-in-string
@@ -84,7 +84,7 @@ Handles {code:lang}...{code} and {noformat}...{noformat}."
   text)
 
 (defun go-jira-markup--convert-quote-blocks (text)
-  "Convert Jira quote blocks to Org-mode quote blocks.
+  "Convert Jira quote blocks of TEXT to Org-mode quote blocks.
 Handles both {quote}...{quote} and bq. syntax."
   ;; Multi-line quotes
   (setq text (replace-regexp-in-string
@@ -101,7 +101,7 @@ Handles both {quote}...{quote} and bq. syntax."
   text)
 
 (defun go-jira-markup--convert-headings (text)
-  "Convert Jira headings to Org-mode headings.
+  "Convert Jira headings of TEXT to Org-mode headings.
 h1. → ***, h2. → ****, etc. (offset by 2 since issue is level 2)."
   (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)$" "*** \\1" text))
   (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)$" "**** \\1" text))
@@ -112,7 +112,7 @@ h1. → ***, h2. → ****, etc. (offset by 2 since issue is level 2)."
   text)
 
 (defun go-jira-markup--convert-lists (text)
-  "Convert Jira lists to Org-mode lists.
+  "Convert Jira lists of TEXT to Org-mode lists.
 Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
   (let ((lines (split-string text "\n"))
         (result '())
@@ -178,7 +178,7 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
           (push (format "%s- %s" indent content) result)))
        
        ;; Empty line or non-list content - reset
-       (t 
+       (t
         (when (string-empty-p (string-trim line))
           (clrhash counters)
           (setq last-was-nested nil))
@@ -187,7 +187,7 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
     (mapconcat #'identity (nreverse result) "\n")))
 
 (defun go-jira-markup--convert-tables (text)
-  "Convert Jira tables to Org-mode tables.
+  "Convert Jira tables of TEXT to Org-mode tables.
 Handles || for headers and | for regular cells."
   (let ((lines (split-string text "\n"))
         (result '())
@@ -219,7 +219,7 @@ Handles || for headers and | for regular cells."
 ;;; Inline conversions
 
 (defun go-jira-markup--convert-inline-formatting (text)
-  "Convert Jira inline formatting to Org-mode.
+  "Convert Jira inline formatting of TEXT to Org-mode.
 Handles bold, italic, monospace, etc."
   ;; Protect inline code first (monospace): {{...}}
   ;; Handle backslashes: \\ in Jira = \ in output
@@ -276,7 +276,7 @@ Handles bold, italic, monospace, etc."
   text)
 
 (defun go-jira-markup--convert-links (text)
-  "Convert Jira links to Org-mode links.
+  "Convert Jira links of TEXT to Org-mode links.
 Handles [text|url|smart-link], [text|url], and [url]."
   ;; Links with 3 parts (smart-link): [text|url|smart-link] → [[url][text]]
   (setq text (replace-regexp-in-string
@@ -300,7 +300,7 @@ Handles [text|url|smart-link], [text|url], and [url]."
   text)
 
 (defun go-jira-markup--convert-images (text)
-  "Convert Jira images to Org-mode image links.
+  "Convert Jira images of TEXT to Org-mode image links.
 Handles !image.png!, !image.png|alt=text!, etc."
   ;; Images with alt text: !image.png|alt=desc! → [[file:image.png][desc]]
   (setq text (replace-regexp-in-string
@@ -323,7 +323,7 @@ Handles !image.png!, !image.png|alt=text!, etc."
   text)
 
 (defun go-jira-markup--convert-colors (text)
-  "Convert Jira color markup.
+  "Convert Jira color markup of TEXT.
 {color:red}text{color} → text (strip colors, or wrap in export block)."
   ;; For now, just strip color markup
   (setq text (replace-regexp-in-string
@@ -333,7 +333,7 @@ Handles !image.png!, !image.png|alt=text!, etc."
   text)
 
 (defun go-jira-markup--convert-datetimes (text)
-  "Convert ISO 8601 datetimes to Org-mode inactive timestamps.
+  "Convert ISO 8601 datetimes of TEXT to Org-mode inactive timestamps.
 e.g., 2025-12-04T22:20:04.549+0100 → [2025-12-04 Thu 22:20]"
   (replace-regexp-in-string
    "\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)T\\([0-9]\\{2\\}\\):\\([0-9]\\{2\\}\\):[0-9.]\\{2,\\}[+-][0-9]\\{4\\}"

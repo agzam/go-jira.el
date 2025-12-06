@@ -189,7 +189,7 @@
 (defun go-jira-eldoc-function (callback &rest _ignored)
   "Eldoc documentation function for Jira tickets.
 Calls CALLBACK with the ticket description when point is on a Jira ticket.
-Designed to work with eldoc-documentation-functions."
+Designed to work with `eldoc-documentation-functions'."
   (when-let* ((ticket (go-jira-eldoc--ticket-at-point))
               ;; Only fetch if in normal state (not while typing)
               (_ (and (bound-and-true-p evil-mode)
@@ -215,7 +215,7 @@ Designed to work with eldoc-documentation-functions."
 
 ;;;###autoload
 (defun go-jira-eldoc-enable ()
-  "Enable go-jira-eldoc-mode in current buffer."
+  "Enable `go-jira-eldoc-mode' in current buffer."
   (interactive)
   (go-jira-eldoc-mode 1)
   (eldoc-mode 1))
@@ -241,13 +241,13 @@ Designed to work with eldoc-documentation-functions."
 
 ;;;###autoload
 (defun go-jira-popup-enable ()
-  "Enable go-jira-popup-mode in current buffer."
+  "Enable `go-jira-popup-mode' in current buffer."
   (interactive)
   (go-jira-popup-mode 1))
 
 ;;;###autoload
 (defun go-jira-enable-popup+eldoc ()
-  "Enable both go-jira-eldoc-mode and go-jira-popup-mode in current buffer.
+  "Enable both `go-jira-eldoc-mode' and `go-jira-popup-mode' in current buffer.
 In GUI Emacs with posframe, the popup will be shown.
 In terminal or without posframe, eldoc provides fallback."
   (interactive)

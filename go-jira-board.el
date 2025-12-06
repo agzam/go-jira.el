@@ -150,7 +150,7 @@ Returns a propertized string with board data attached."
                 'consult--annotation annotation)))
 
 (defun go-jira--get-board-data (board-id name type project)
-  "Fetch complete board data for BOARD-ID.
+  "Fetch complete board data for BOARD-ID, NAME, TYPE, PROJECT.
 Returns a plist with all board information including JQL and columns."
   (message "Fetching board configuration...")
   (let* ((config (go-jira--fetch-board-config board-id))
@@ -343,7 +343,7 @@ Returns a plist with :description, :comments, etc."
        nil))))
 
 (defun go-jira--adjust-heading-levels (text base-level)
-  "Adjust org-mode heading levels in TEXT to be relative to BASE-LEVEL.
+  "Adjust `org-mode' heading levels in TEXT to be relative to BASE-LEVEL.
 Any line starting with one or more asterisks followed by a space
 will have BASE-LEVEL asterisks added to it."
   (with-temp-buffer
