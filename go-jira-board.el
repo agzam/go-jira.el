@@ -342,6 +342,26 @@ Returns a plist with :description, :comments, etc."
        (message "Warning: Failed to fetch issue details: %s" (error-message-string err))
        nil))))
 
+(defun go-jira--fetch-subtasks (issue-key)
+  "Fetch subtasks for ISSUE-KEY.
+Returns the output as a string, or nil if empty."
+  (require 'ansi-color)
+  (let* ((j (go-jira--find-exe))
+         (cmd (format "%s list --query 'parent = %s'" j issue-key))
+         (output (ansi-color-apply (shell-command-to-string cmd))))
+    (unless (string-blank-p output)
+      (string-trim output))))
+
+(defun go-jira--fetch-linked-items (issue-key)
+  "Fetch linked work items for ISSUE-KEY.
+Returns the output as a string, or nil if empty."
+  (require 'ansi-color)
+  (let* ((j (go-jira--find-exe))
+         (cmd (format "%s list --query 'issue in linkedIssues(%s)'" j issue-key))
+         (output (ansi-color-apply (shell-command-to-string cmd))))
+    (unless (string-blank-p output)
+      (string-trim output))))
+
 (defun go-jira--adjust-heading-levels (text base-level)
   "Adjust `org-mode' heading levels in TEXT to be relative to BASE-LEVEL.
 Any line starting with one or more asterisks followed by a space
@@ -376,13 +396,26 @@ will have BASE-LEVEL asterisks added to it."
                 ;; Temporarily remove org-fold hook to prevent it from "fixing" visibility
                 (after-change-functions (remove 'org-fold-core--fix-folded-region after-change-functions)))
             
-            ;; Insert description
+            ;; Insert description directly (no heading)
             (when description
-              (insert (format "\n%s Description\n" (make-string description-level ?*)))
+              (insert "\n")
               (let ((converted (go-jira-markup-to-org description)))
                 (when converted
-                  (insert (go-jira--adjust-heading-levels converted description-level)))
+                  ;; Adjust any headings in the description to be relative to current issue level
+                  (insert (go-jira--adjust-heading-levels converted current-level)))
                 (insert "\n")))
+            
+            ;; Insert subtasks
+            (when-let ((subtasks (go-jira--fetch-subtasks issue-key)))
+              (insert (format "%s Subtasks\n" (make-string description-level ?*)))
+              (insert subtasks)
+              (insert "\n\n"))
+            
+            ;; Insert linked items
+            (when-let ((linked (go-jira--fetch-linked-items issue-key)))
+              (insert (format "%s Linked work items\n" (make-string description-level ?*)))
+              (insert linked)
+              (insert "\n\n"))
             
             ;; Insert comments
             (when comments

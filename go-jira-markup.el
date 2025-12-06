@@ -103,12 +103,12 @@ Handles both {quote}...{quote} and bq. syntax."
 (defun go-jira-markup--convert-headings (text)
   "Convert Jira headings of TEXT to Org-mode headings.
 h1. → ***, h2. → ****, etc. (offset by 2 since issue is level 2)."
-  (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)$" "*** \\1" text))
-  (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)$" "**** \\1" text))
-  (setq text (replace-regexp-in-string "^h3\\. \\(.+\\)$" "***** \\1" text))
-  (setq text (replace-regexp-in-string "^h4\\. \\(.+\\)$" "****** \\1" text))
-  (setq text (replace-regexp-in-string "^h5\\. \\(.+\\)$" "******* \\1" text))
-  (setq text (replace-regexp-in-string "^h6\\. \\(.+\\)$" "******** \\1" text))
+  (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)" "*** \\1" text))
+  (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)" "**** \\1" text))
+  (setq text (replace-regexp-in-string "^h3\\. \\(.+\\)" "***** \\1" text))
+  (setq text (replace-regexp-in-string "^h4\\. \\(.+\\)" "****** \\1" text))
+  (setq text (replace-regexp-in-string "^h5\\. \\(.+\\)" "******* \\1" text))
+  (setq text (replace-regexp-in-string "^h6\\. \\(.+\\)" "******** \\1" text))
   text)
 
 (defun go-jira-markup--convert-lists (text)
@@ -120,57 +120,51 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
         (last-was-nested nil)) ; Track if last line was #* or *#
     (dolist (line lines)
       (cond
-       ;; Mixed: #* → "  -" (bullet under number), *# → "  1." (number under bullet)
-       ((string-match "^\\([#*+-]+\\)\\([#*+-]+\\) \\(.+\\)$" line)
+       ;; #*, #**, #*** pattern: bullets nested under number
+       ((string-match "^\\(#+\\)\\([*+-]+\\) \\(.+\\)$" line)
         (let* ((prefix1 (match-string 1 line))
                (prefix2 (match-string 2 line))
-               (content (match-string 3 line)))
-          (cond
-           ;; #* pattern: bullet nested under number
-           ((and (string-match-p "^#+$" prefix1) (string-match-p "^[*+-]+$" prefix2))
-            (let* ((indent (make-string (+ (* (length prefix1) 2)
-                                          (* (1- (length prefix2)) 2))
-                                       ?\s)))
-              (setq last-was-nested 'hash-star)
-              (push (format "%s- %s" indent content) result)))
-           
-           ;; *# pattern: numbered item nested under bullet
-           ((and (string-match-p "^[*+-]+$" prefix1) (string-match-p "^#+$" prefix2))
-            (let* ((base-indent (* (length prefix1) 2))
-                   (num-indent (+ base-indent (* (1- (length prefix2)) 2)))
-                   (indent (make-string num-indent ?\s))
-                   (level-key (format "%s-%s" prefix1 prefix2))
-                   (counter (1+ (gethash level-key counters 0))))
-              (puthash level-key counter counters)
-              (setq last-was-nested 'star-hash)
-              (push (format "%s%d. %s" indent counter content) result)))
-           
-           ;; Other patterns: just output as-is
-           (t (push line result)))))
+               (content (match-string 3 line))
+               (num-indent (* (length prefix1) 2))
+               (bullet-indent (+ num-indent (* (1- (length prefix2)) 2)))
+               (indent (make-string bullet-indent ?\s)))
+          (setq last-was-nested 'hash-star)
+          (push (format "%s- %s" indent content) result)))
+       
+       ;; *# pattern: numbered item nested under bullet  
+       ((string-match "^\\([*+-]+\\)\\(#+\\) \\(.+\\)$" line)
+        (let* ((prefix1 (match-string 1 line))
+               (prefix2 (match-string 2 line))
+               (content (match-string 3 line))
+               (base-indent (* (length prefix1) 2))
+               (num-indent (+ base-indent (* (1- (length prefix2)) 2)))
+               (indent (make-string num-indent ?\s))
+               (level-key (format "%s-%s" prefix1 prefix2))
+               (counter (1+ (gethash level-key counters 0))))
+          (puthash level-key counter counters)
+          (setq last-was-nested 'star-hash)
+          (push (format "%s%d. %s" indent counter content) result)))
        
        ;; Numbered list: # → 1., ## → "  1."
        ((string-match "^\\(#+\\) \\(.+\\)$" line)
         (let* ((level (match-string 1 line))
-               (content (match-string 2 line)))
-          (if (eq last-was-nested 'hash-star)
-              ;; After #* items, # text should be plain text (strip #)
-              (progn
-                (setq last-was-nested nil)
-                (push content result))
-            ;; Normal numbered list
-            (let* ((indent (make-string (* (1- (length level)) 2) ?\s))
-                   (level-key (length level))
-                   (counter (1+ (gethash level-key counters 0))))
-              (puthash level-key counter counters)
-              (maphash (lambda (k v)
-                         (when (> k level-key)
-                           (puthash k 0 counters)))
-                       counters)
-              (setq last-was-nested nil)
-              (push (format "%s%d. %s" indent counter content) result)))))
+               (content (match-string 2 line))
+               (indent (make-string (* (1- (length level)) 2) ?\s))
+               (level-key (length level))
+               (counter (1+ (gethash level-key counters 0))))
+          (puthash level-key counter counters)
+          ;; Reset counters for deeper levels
+          (maphash (lambda (k v)
+                     (when (> k level-key)
+                       (puthash k 0 counters)))
+                   counters)
+          (setq last-was-nested nil)
+          (push (format "%s%d. %s" indent counter content) result)))
        
        ;; Bulleted list: * → -, ** → "  -"
-       ((string-match "^\\([*+-]+\\) \\(.+\\)$" line)
+       ;; Skip if this looks like an org heading (starts with *** or more)
+       ((and (string-match "^\\([*+-]+\\) \\(.+\\)$" line)
+             (not (string-match "^\\*\\{3,\\} " line)))
         (let* ((level (match-string 1 line))
                (content (match-string 2 line))
                (indent (make-string (* (1- (length level)) 2) ?\s)))
@@ -243,9 +237,10 @@ Handles bold, italic, monospace, etc."
               text))
   
   ;; Strikethrough: -text- → +text+
-  ;; Only match if preceded by space/tab (not newline, which would catch list bullets)
+  ;; Only match if preceded by space/tab and the content doesn't start/end with space
+  ;; This avoids matching " - " which is just a dash separator
   (setq text (replace-regexp-in-string
-              "\\([ \t]\\)-\\([^-\n]+?\\)-\\([ \t]\\|$\\)"
+              "\\([ \t]\\)-\\([^ \t\n-][^-\n]*?[^ \t\n-]\\)-\\([ \t]\\|$\\)"
               "\\1+\\2+\\3"
               text))
   
@@ -380,7 +375,8 @@ Returns the converted text as a string."
       ;; Phase 5: Clean up whitespace
       (setq text (go-jira-markup--clean-whitespace text))
       
-      text)))
+      ;; Trim trailing whitespace
+      (string-trim-right text))))
 
 (defun go-jira-markup--clean-whitespace (text)
   "Clean up excessive whitespace in TEXT.
