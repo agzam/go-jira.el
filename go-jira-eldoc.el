@@ -31,6 +31,18 @@
 (defvar go-jira-popup-buffer " *jira-ticket-popup*"
   "Buffer name for Jira ticket popup.")
 
+(defcustom go-jira-popup-idle-delay 0.5
+  "Number of seconds to wait before fetching ticket info.
+Only fetch after cursor has been stable on a ticket for this duration."
+  :type 'number
+  :group 'go-jira)
+
+(defvar-local go-jira--pending-timer nil
+  "Timer for pending popup fetch request.")
+
+(defvar-local go-jira--active-process nil
+  "Currently active async process fetching ticket data.")
+
 (defface go-jira-popup-face
   '((t :inherit default))
   "Face for Jira ticket description popup."
@@ -41,8 +53,8 @@
   "Face for Jira popup border."
   :group 'go-jira)
 
-(defvar-local go-jira--last-ticket-pos nil
-  "Last position where we showed a Jira ticket popup.")
+(defvar-local go-jira--last-ticket nil
+  "Last ticket we showed a popup for.")
 
 (defvar go-jira--posframe-available-p nil
   "Whether posframe is available.")
@@ -82,6 +94,32 @@
         (go-jira-eldoc--cache-put ticket summary)
         summary)))
 
+(defun go-jira-eldoc--fetch-description-async (ticket callback)
+  "Fetch description for TICKET asynchronously, call CALLBACK with result.
+CALLBACK is called with two arguments: TICKET and DESCRIPTION.
+Returns the process object."
+  (if-let ((cached (go-jira-eldoc--cache-get ticket)))
+      (progn
+        (funcall callback ticket cached)
+        nil)
+    (let* ((j (go-jira--find-exe))
+           (cmd (format "%s view %s --gjq 'fields.summary'" j ticket))
+           (output-buffer (generate-new-buffer " *jira-fetch*"))
+           (proc (make-process
+                  :name (format "jira-fetch-%s" ticket)
+                  :buffer output-buffer
+                  :command (list shell-file-name "-c" cmd)
+                  :sentinel
+                  (lambda (process event)
+                    (when (string-match-p "finished" event)
+                      (with-current-buffer (process-buffer process)
+                        (let ((summary (string-trim (buffer-string))))
+                          (unless (string-empty-p summary)
+                            (go-jira-eldoc--cache-put ticket summary)
+                            (funcall callback ticket summary)))))
+                    (kill-buffer (process-buffer process))))))
+      proc)))
+
 (defun go-jira-eldoc--ticket-at-point ()
   "Return Jira ticket at point if present, nil otherwise."
   (when-let* ((ticket-pattern "\\b[A-Z]\\{2,10\\}-[0-9]+\\b")
@@ -115,7 +153,17 @@
   "Hide the Jira ticket popup."
   (when go-jira--posframe-available-p
     (posframe-hide go-jira-popup-buffer))
-  (setq go-jira--last-ticket-pos nil))
+  (setq go-jira--last-ticket nil))
+
+(defun go-jira-popup--cancel-pending ()
+  "Cancel any pending fetch timer or process."
+  (when go-jira--pending-timer
+    (cancel-timer go-jira--pending-timer)
+    (setq go-jira--pending-timer nil))
+  (when (and go-jira--active-process
+             (process-live-p go-jira--active-process))
+    (delete-process go-jira--active-process)
+    (setq go-jira--active-process nil)))
 
 (defun go-jira-popup--maybe-hide ()
   "Hide popup if it's visible but we're not in the source buffer anymore."
@@ -153,8 +201,7 @@
          :override-parameters '((no-accept-focus . t)))
         ;; Store which buffer this popup belongs to
         (with-current-buffer go-jira-popup-buffer
-          (setq-local go-jira--popup-source-buffer current-buf))
-        (setq go-jira--last-ticket-pos (point)))
+          (setq-local go-jira--popup-source-buffer current-buf)))
     ;; Fallback: do nothing, eldoc will handle it
     nil))
 
@@ -166,21 +213,39 @@
             (_ (and (bound-and-true-p evil-mode)
                     (eq evil-state 'normal))))
       (progn
-        ;; Only update if we moved to a different position
-        (unless (and go-jira--last-ticket-pos
-                     (= (point) go-jira--last-ticket-pos))
+        ;; Check if this is a different ticket than what we're showing
+        (if (equal ticket go-jira--last-ticket)
+            ;; Same ticket - do nothing, keep showing popup
+            nil
+          ;; Different ticket - cancel pending and fetch new one
+          (go-jira-popup--cancel-pending)
+          ;; Mark this ticket as current IMMEDIATELY to prevent re-triggering
+          (setq go-jira--last-ticket ticket)
           ;; Try to get from cache immediately
           (if-let ((description (go-jira-eldoc--cache-get ticket)))
               (go-jira-popup--show ticket description)
-            ;; Fetch async if not in cache
-            (run-with-idle-timer
-             0.2 nil
-             (lambda ()
-               (when (and (eq (current-buffer) (window-buffer))
-                          (go-jira-eldoc--ticket-at-point))
-                 (when-let ((desc (go-jira-eldoc--fetch-description ticket)))
-                   (go-jira-popup--show ticket desc))))))))
-    ;; Not on a ticket, hide popup
+            ;; Debounced fetch: wait for cursor to be stable
+            (let ((current-buf (current-buffer))
+                  (current-pos (point)))
+              (setq go-jira--pending-timer
+                    (run-with-idle-timer
+                     go-jira-popup-idle-delay nil
+                     (lambda ()
+                       ;; Only fetch if still in same buffer/position
+                       (when (and (buffer-live-p current-buf)
+                                  (eq current-buf (current-buffer))
+                                  (= current-pos (point)))
+                         (setq go-jira--active-process
+                               (go-jira-eldoc--fetch-description-async
+                                ticket
+                                (lambda (tkt desc)
+                                  ;; Only show if still on same ticket
+                                  (when (and (buffer-live-p current-buf)
+                                             (eq current-buf (current-buffer))
+                                             (equal tkt (go-jira-eldoc--ticket-at-point)))
+                                    (go-jira-popup--show tkt desc)))))))))))))
+    ;; Not on a ticket, cancel and hide popup
+    (go-jira-popup--cancel-pending)
     (go-jira-popup--hide)))
 
 ;;; Public API
@@ -195,14 +260,13 @@ Designed to work with `eldoc-documentation-functions'."
               (_ (and (bound-and-true-p evil-mode)
                       (eq evil-state 'normal))))
     ;; Fetch asynchronously to avoid blocking
-    (run-with-idle-timer
-     0.1 nil
-     (lambda ()
-       (when-let ((description (go-jira-eldoc--fetch-description ticket)))
-         (funcall callback
-                  (format "%s: %s" ticket description)
-                  :thing ticket
-                  :face 'font-lock-doc-face))))))
+    (go-jira-eldoc--fetch-description-async
+     ticket
+     (lambda (tkt desc)
+       (funcall callback
+                (format "%s: %s" tkt desc)
+                :thing tkt
+                :face 'font-lock-doc-face)))))
 
 ;;;###autoload
 (define-minor-mode go-jira-eldoc-mode
@@ -237,6 +301,7 @@ Designed to work with `eldoc-documentation-functions'."
     (when (bound-and-true-p evil-mode)
       (remove-hook 'evil-insert-state-entry-hook #'go-jira-popup--hide t))
     (remove-hook 'buffer-list-update-hook #'go-jira-popup--maybe-hide)
+    (go-jira-popup--cancel-pending)
     (go-jira-popup--hide)))
 
 ;;;###autoload

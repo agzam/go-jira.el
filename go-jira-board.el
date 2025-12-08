@@ -532,7 +532,7 @@ to display the board immediately."
 
 ;;;###autoload
 (defun go-jira-display-board (&optional board-data)
-  "Display a Jira board in 'org-mode' format.
+  "Display a Jira board in `org-mode' format.
 If BOARD-DATA is not provided, prompts for board selection via
 `go-jira-browse-boards'. BOARD-DATA should be a plist with :jql
 and :columns keys.

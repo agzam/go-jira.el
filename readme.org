@@ -1,0 +1,34 @@
+#+title: Jira Emacs integration
+[[https://github.com/agzam/go-jira.el/actions/workflows/run-tests.yml][https://github.com/agzam/go-jira.el/actions/workflows/run-tests.yml/badge.svg]]
+
+* Why ...
+Because Jira UI sucks and I just can't stand it. It's a useless time wasting mental black hole that bombards my brain neurons with useless crap and I don't have time and patience to deal with it. Unfortunately, I have to use it for work.
+
+* What ...
+This is an Emacs package that works with Jira while delegating the part of auth/fetching data to [[https://github.com/go-jira/jira][go-jira]] CLI tool - hence the name.
+
+
+* How ...
+You can install the package through your favorite Emacs package manager, it's not published on any public repositories such as MELPA, because of its highly opinionated UI and I made it mainly to serve my own needs.
+
+You can still grab it directly from GitHub, here's the example Doom config:
+
+#+begin_src elisp
+(package! go-jira :recipe
+  (:recipe (:host github
+            :repo "agzam/go-jira.el"
+            :files ("*.el"))))
+#+end_src
+
+
+* Features:
+
+ - Show description of a ticket when cursor is at point of a text matching Jira ticket number, e.g., "XYZ-12345" - ~go-jira-popup-mode~
+
+   - That also works in TUI only - ~go-jira-eldoc-mode~
+
+ - ~go-jira-view-ticket~ command - shows the ticket description, subtasks, linked items and comments in a an Org-mode outline
+
+ - ~go-jira-display-board~ - consult picker that allows you to find a board and display the list of tickets on the board, again in an Org-mode outline. Whenever any headline gets expanded, it fetches individual ticket data while parsing jira markup to org-mode format.
+     
+- Embark integration - adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.

@@ -4,7 +4,7 @@
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (embark "0.20"))
+;; Package-Requires: ((emacs "29.1") (embark "0.20") (org "9.8"))
 ;; Keywords: tools, jira
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'go-jira)
+(require 'org-macs)
 
 ;;;###autoload
 (defun go-jira-embark-target-ticket-at-point ()
@@ -27,14 +28,6 @@
               (end (cdr bounds)))
     `(jira-ticket ,(buffer-substring-no-properties beg end)
       . ,(cons beg end))))
-
-(defun go-jira-find-pull-requests-on-github (&optional jira-ticket)
-  "Search for mentioning of JIRA-TICKET on GitHub.
-If JIRA-TICKET is not provided, uses ticket at point or prompts."
-  (interactive)
-  (let* ((ticket (or (go-jira--ticket-arg-or-ticket-at-point jira-ticket)
-                     (read-string "Gimme the JIRA ticket to search: "))))
-    (github-topics-find-prs ticket)))
 
 (provide 'go-jira-embark)
 ;;; go-jira-embark.el ends here
