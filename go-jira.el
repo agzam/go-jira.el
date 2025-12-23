@@ -193,6 +193,18 @@ becomes SAC-28812__add_new_metadata_tap-asana"
 
 ;;; Ticket viewing and browsing
 
+(defun go-jira--fontify-jira-headings (limit)
+  "Fontify text with jira-heading property up to LIMIT."
+  (let ((pos (point)))
+    (while (and (< pos limit)
+                (setq pos (next-single-property-change pos 'jira-heading nil limit)))
+      (when-let ((level (get-text-property pos 'jira-heading)))
+        (let* ((end (next-single-property-change pos 'jira-heading nil limit))
+               (face (intern (format "markdown-header-face-%d" level))))
+          (put-text-property pos end 'face face)
+          (setq pos end))))
+    nil))
+
 (defvar go-jira-view-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-o") #'go-jira-view-mode-open-browser)
@@ -208,6 +220,11 @@ becomes SAC-28812__add_new_metadata_tap-asana"
 \\{go-jira-view-mode-map}"
   :group 'go-jira
   (setq-local buffer-read-only t)
+  
+  ;; Add font-lock for Jira headings
+  (font-lock-add-keywords nil
+   '((go-jira--fontify-jira-headings)))
+  
   (message "Press 'C-c C-o' to open in browser, 'C' to add comment, 'r' to refresh, 'q' to quit"))
 
 (defun go-jira-view-mode-open-browser ()

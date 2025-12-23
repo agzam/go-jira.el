@@ -156,13 +156,28 @@
   
   (describe "headings"
     
-    (it "converts h1 to org heading"
-      (expect (go-jira-markup-to-org "h1. Main heading")
-              :to-equal "*** Main heading"))
+    (it "converts h1 with jira-heading property"
+      (let ((result (go-jira-markup-to-org "h1. Main heading")))
+        (expect result :to-match "Main heading")
+        (expect (get-text-property 0 'jira-heading result) :to-equal 1)))
     
-    (it "converts h2 to org heading"
-      (expect (go-jira-markup-to-org "h2. Sub heading")
-              :to-equal "**** Sub heading")))
+    (it "converts h2 with jira-heading property"
+      (let ((result (go-jira-markup-to-org "h2. Sub heading")))
+        (expect result :to-match "Sub heading")
+        (expect (get-text-property 0 'jira-heading result) :to-equal 2)))
+    
+    (it "converts h3 with jira-heading property"
+      (let ((result (go-jira-markup-to-org "h3. Run linter")))
+        (expect result :to-match "Run linter")
+        (expect (get-text-property 0 'jira-heading result) :to-equal 3)))
+    
+    (it "converts h4-h6 with jira-heading properties"
+      (let ((result4 (go-jira-markup-to-org "h4. Details"))
+            (result5 (go-jira-markup-to-org "h5. More"))
+            (result6 (go-jira-markup-to-org "h6. Even more")))
+        (expect (get-text-property 0 'jira-heading result4) :to-equal 4)
+        (expect (get-text-property 0 'jira-heading result5) :to-equal 5)
+        (expect (get-text-property 0 'jira-heading result6) :to-equal 6))))
   
   (describe "code blocks"
     

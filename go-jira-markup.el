@@ -101,32 +101,43 @@ Handles both {quote}...{quote} and bq. syntax."
   text)
 
 (defun go-jira-markup--convert-headings (text)
-  "Convert Jira headings of TEXT to Org-mode headings.
-h1. → ***, h2. → ****, etc. (offset by 2 since issue is level 2).
-Protect the converted headings so the list converter doesn't touch them."
+  "Convert Jira headings of TEXT to plain text with jira-heading property.
+We add a custom property that font-lock will use to apply faces."
   (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)" 
               (lambda (match)
-                (go-jira-markup--protect-block (format "*** %s" (match-string 1 match))))
+                (let ((content (match-string 1 match)))
+                  (go-jira-markup--protect-block 
+                   (propertize content 'jira-heading 1 'font-lock-multiline t))))
               text))
   (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)" 
               (lambda (match)
-                (go-jira-markup--protect-block (format "**** %s" (match-string 1 match))))
+                (let ((content (match-string 1 match)))
+                  (go-jira-markup--protect-block 
+                   (propertize content 'jira-heading 2 'font-lock-multiline t))))
               text))
   (setq text (replace-regexp-in-string "^h3\\. \\(.+\\)" 
               (lambda (match)
-                (go-jira-markup--protect-block (format "***** %s" (match-string 1 match))))
+                (let ((content (match-string 1 match)))
+                  (go-jira-markup--protect-block 
+                   (propertize content 'jira-heading 3 'font-lock-multiline t))))
               text))
   (setq text (replace-regexp-in-string "^h4\\. \\(.+\\)" 
               (lambda (match)
-                (go-jira-markup--protect-block (format "****** %s" (match-string 1 match))))
+                (let ((content (match-string 1 match)))
+                  (go-jira-markup--protect-block 
+                   (propertize content 'jira-heading 4 'font-lock-multiline t))))
               text))
   (setq text (replace-regexp-in-string "^h5\\. \\(.+\\)" 
               (lambda (match)
-                (go-jira-markup--protect-block (format "******* %s" (match-string 1 match))))
+                (let ((content (match-string 1 match)))
+                  (go-jira-markup--protect-block 
+                   (propertize content 'jira-heading 5 'font-lock-multiline t))))
               text))
   (setq text (replace-regexp-in-string "^h6\\. \\(.+\\)" 
               (lambda (match)
-                (go-jira-markup--protect-block (format "******** %s" (match-string 1 match))))
+                (let ((content (match-string 1 match)))
+                  (go-jira-markup--protect-block 
+                   (propertize content 'jira-heading 6 'font-lock-multiline t))))
               text))
   text)
 
@@ -254,15 +265,24 @@ Handles bold, italic, monospace, etc."
               text))
   
   ;; Strikethrough: -text- → +text+ (protect it so Insert doesn't convert it)
-  ;; Match at beginning of line or after space, and content can't start/end with space
+  ;; Match -text- including internal hyphens like "sub-type"
+  ;; Match with space before and space/eol/punct after
   (setq text (replace-regexp-in-string
-              "\\(^\\|[ \t]\\)-\\([^ \t\n-][^-\n]*?[^ \t\n-]\\)-\\([ \t]\\|[[:punct:]]\\|$\\)"
+              " -\\([^-\n][^-\n]*\\(?:-[^-\n]+\\)*\\)-\\([ \t\n]\\|$\\)"
               (lambda (match)
-                (let ((before (match-string 1 match))
-                      (content (match-string 2 match))
-                      (after (match-string 3 match)))
-                  (concat before
+                (let ((content (match-string 1 match))
+                      (after (match-string 2 match)))
+                  (concat " "
                           (go-jira-markup--protect-block (format "+%s+" content))
+                          after)))
+              text))
+  ;; Also match at beginning of line
+  (setq text (replace-regexp-in-string
+              "^-\\([^-\n][^-\n]*\\(?:-[^-\n]+\\)*\\)-\\([ \t\n]\\|$\\)"
+              (lambda (match)
+                (let ((content (match-string 1 match))
+                      (after (match-string 2 match)))
+                  (concat (go-jira-markup--protect-block (format "+%s+" content))
                           after)))
               text))
   
@@ -378,18 +398,18 @@ Returns the converted text as a string."
       ;; Phase 1: Protect and convert code blocks
       (setq text (go-jira-markup--convert-code-blocks text))
       
-      ;; Phase 2: Block-level conversions
-      (setq text (go-jira-markup--convert-quote-blocks text))
-      (setq text (go-jira-markup--convert-headings text))
-      (setq text (go-jira-markup--convert-lists text))
-      (setq text (go-jira-markup--convert-tables text))
-      
-      ;; Phase 3: Inline conversions
+      ;; Phase 2: Inline conversions (BEFORE lists, so strikethrough works in list items)
       (setq text (go-jira-markup--convert-inline-formatting text))
       (setq text (go-jira-markup--convert-links text))
       (setq text (go-jira-markup--convert-images text))
       (setq text (go-jira-markup--convert-colors text))
       (setq text (go-jira-markup--convert-datetimes text))
+      
+      ;; Phase 3: Block-level conversions
+      (setq text (go-jira-markup--convert-quote-blocks text))
+      (setq text (go-jira-markup--convert-headings text))
+      (setq text (go-jira-markup--convert-lists text))
+      (setq text (go-jira-markup--convert-tables text))
       
       ;; Phase 4: Restore protected blocks
       (setq text (go-jira-markup--restore-blocks text))

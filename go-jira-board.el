@@ -459,6 +459,11 @@ will have BASE-LEVEL asterisks added to it."
   (setq-local buffer-read-only t)
   (setq-local go-jira--expanded-issues (make-hash-table :test 'equal))
   (add-hook 'org-cycle-hook #'go-jira--on-cycle-expand-issue nil t)
+  
+  ;; Add font-lock for Jira headings
+  (font-lock-add-keywords nil
+   '((go-jira--fontify-jira-headings)))
+  
   (message "Press 'C-c C-c' to toggle columns view, 'RET' to view issue, 'C' to add comment, 'b' to browse in browser, 'r' to refresh, 'q' to quit"))
 
 (defun go-jira-board-view-issue ()
