@@ -256,6 +256,7 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                (comment-data (when fields (gethash 'comment fields)))
                (comments (when comment-data (gethash 'comments comment-data))))
           (with-current-buffer buf
+            (setq-local buffer-read-only nil)
             (erase-buffer)
             (insert (format "* %s: %s\n" key summary))
             (when description
