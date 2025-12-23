@@ -111,6 +111,27 @@
 4. Item 4
 5. Item 5"))))
   
+  (describe "deeply nested lists"
+    
+    (it "converts three-level nested bulleted list correctly"
+      (let ((input "* One
+** Two
+*** Three"))
+        (expect (go-jira-markup-to-org input)
+                :to-equal "- One
+  - Two
+    - Three")))
+    
+    (it "does not confuse three asterisks with org headings"
+      (let ((input "* Item
+** Sub-item
+*** Sub-sub-item"))
+        (let ((result (go-jira-markup-to-org input)))
+          (expect result :to-match "^- Item$")
+          (expect result :to-match "^  - Sub-item$")
+          (expect result :to-match "^    - Sub-sub-item$")
+          (expect result :not :to-match "\\*\\*\\*")))))
+  
   (describe "basic inline formatting"
     
     (it "converts inline code"
@@ -123,7 +144,15 @@
     
     (it "converts italic text"
       (expect (go-jira-markup-to-org "Some _italic_ text")
-              :to-match "/italic/")))
+              :to-match "/italic/"))
+    
+    (it "converts strikethrough text"
+      (expect (go-jira-markup-to-org "Some -strikethrough- text")
+              :to-equal "Some +strikethrough+ text"))
+    
+    (it "converts underline/insert text"
+      (expect (go-jira-markup-to-org "Some +underlined+ text")
+              :to-equal "Some _underlined_ text")))
   
   (describe "headings"
     
