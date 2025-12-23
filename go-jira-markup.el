@@ -102,13 +102,32 @@ Handles both {quote}...{quote} and bq. syntax."
 
 (defun go-jira-markup--convert-headings (text)
   "Convert Jira headings of TEXT to Org-mode headings.
-h1. → ***, h2. → ****, etc. (offset by 2 since issue is level 2)."
-  (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)" "*** \\1" text))
-  (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)" "**** \\1" text))
-  (setq text (replace-regexp-in-string "^h3\\. \\(.+\\)" "***** \\1" text))
-  (setq text (replace-regexp-in-string "^h4\\. \\(.+\\)" "****** \\1" text))
-  (setq text (replace-regexp-in-string "^h5\\. \\(.+\\)" "******* \\1" text))
-  (setq text (replace-regexp-in-string "^h6\\. \\(.+\\)" "******** \\1" text))
+h1. → ***, h2. → ****, etc. (offset by 2 since issue is level 2).
+Protect the converted headings so the list converter doesn't touch them."
+  (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)" 
+              (lambda (match)
+                (go-jira-markup--protect-block (format "*** %s" (match-string 1 match))))
+              text))
+  (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)" 
+              (lambda (match)
+                (go-jira-markup--protect-block (format "**** %s" (match-string 1 match))))
+              text))
+  (setq text (replace-regexp-in-string "^h3\\. \\(.+\\)" 
+              (lambda (match)
+                (go-jira-markup--protect-block (format "***** %s" (match-string 1 match))))
+              text))
+  (setq text (replace-regexp-in-string "^h4\\. \\(.+\\)" 
+              (lambda (match)
+                (go-jira-markup--protect-block (format "****** %s" (match-string 1 match))))
+              text))
+  (setq text (replace-regexp-in-string "^h5\\. \\(.+\\)" 
+              (lambda (match)
+                (go-jira-markup--protect-block (format "******* %s" (match-string 1 match))))
+              text))
+  (setq text (replace-regexp-in-string "^h6\\. \\(.+\\)" 
+              (lambda (match)
+                (go-jira-markup--protect-block (format "******** %s" (match-string 1 match))))
+              text))
   text)
 
 (defun go-jira-markup--convert-lists (text)
