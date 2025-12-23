@@ -21,6 +21,7 @@
 (require 'consult)
 (require 'go-jira)
 (require 'go-jira-markup)
+(require 'go-jira-comment)
 
 (defcustom go-jira-default-project "SAC"
   "Default Jira project key for board browsing."
@@ -296,6 +297,7 @@ Returns an alist of (column-name . (issue-list))."
     (define-key map (kbd "RET") #'go-jira-board-view-issue)
     (define-key map (kbd "b") #'go-jira-board-browse-issue-url)
     (define-key map (kbd "r") #'go-jira-board-refresh)
+    (define-key map (kbd "C") #'go-jira-add-comment)
     (define-key map (kbd "q") #'quit-window)
     (define-key map (kbd "C-c C-c") #'org-columns)
     map)
@@ -457,7 +459,7 @@ will have BASE-LEVEL asterisks added to it."
   (setq-local buffer-read-only t)
   (setq-local go-jira--expanded-issues (make-hash-table :test 'equal))
   (add-hook 'org-cycle-hook #'go-jira--on-cycle-expand-issue nil t)
-  (message "Press 'C-c C-c' to toggle columns view, 'RET' to view issue, 'b' to browse in browser, 'r' to refresh, 'q' to quit"))
+  (message "Press 'C-c C-c' to toggle columns view, 'RET' to view issue, 'C' to add comment, 'b' to browse in browser, 'r' to refresh, 'q' to quit"))
 
 (defun go-jira-board-view-issue ()
   "View the Jira issue at point."

@@ -30,5 +30,7 @@ You can still grab it directly from GitHub, here's the example Doom config:
  - ~go-jira-view-ticket~ command - shows the ticket description, subtasks, linked items and comments in a an Org-mode outline
 
  - ~go-jira-display-board~ - consult picker that allows you to find a board and display the list of tickets on the board, again in an Org-mode outline. Whenever any headline gets expanded, it fetches individual ticket data while parsing jira markup to org-mode format.
+
+ - ~go-jira-add-comment~ (bound to =C= in both view and board modes) - adds comments to tickets with an overlay-based UI inspired by gptel. Write your comment in Org-mode format (with support for headings, bold, italic, code blocks, links, lists, etc.) and it will be automatically converted to Jira markup when submitted. Press =C-c C-c= to submit or =C-c C-k= to abort.
      
 - Embark integration - adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.

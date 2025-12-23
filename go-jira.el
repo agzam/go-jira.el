@@ -32,6 +32,7 @@
 (require 'ansi-color)
 (require 'markdown-mode)
 (require 's)
+(require 'go-jira-comment)
 
 (defgroup go-jira nil
   "Emacs interface to go-jira CLI tool."
@@ -197,6 +198,7 @@ becomes SAC-28812__add_new_metadata_tap-asana"
     (define-key map (kbd "C-c C-o") #'go-jira-view-mode-open-browser)
     (define-key map (kbd "C-c C-u") #'go-jira-view-mode-copy-url)
     (define-key map (kbd "r") #'go-jira-view-mode-refresh)
+    (define-key map (kbd "C") #'go-jira-add-comment)
     (define-key map (kbd "q") #'kill-buffer-and-window)
     map)
   "Keymap for `go-jira-view-mode'.")
@@ -206,7 +208,7 @@ becomes SAC-28812__add_new_metadata_tap-asana"
 \\{go-jira-view-mode-map}"
   :group 'go-jira
   (setq-local buffer-read-only t)
-  (message "Press 'C-c C-o' to open in browser, 'r' to refresh, 'q' to quit"))
+  (message "Press 'C-c C-o' to open in browser, 'C' to add comment, 'r' to refresh, 'q' to quit"))
 
 (defun go-jira-view-mode-open-browser ()
   "Open ticket in browser from jira view mode."

@@ -1,0 +1,49 @@
+#+TITLE: Changelog
+#+AUTHOR: Ag Ibragimov
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [[https://keepachangelog.com/en/1.0.0/][Keep a Changelog]],
+and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Versioning]].
+
+* [[Unreleased]]
+
+** Added
+- Comment support for Jira tickets with overlay-based UI
+  - =go-jira-add-comment= command bound to =C= in both view and board modes
+  - Inline comment composition using Org-mode markup
+  - Automatic conversion from Org-mode to Jira wiki markup
+  - Submit with =C-c C-c=, abort with =C-c C-k=
+- Bidirectional markup conversion in =go-jira-markup.el=
+  - =go-jira-markup-from-org= function converts Org-mode to Jira markup
+  - Support for headings (h1-h6), bold, italic, underline, strikethrough
+  - Support for inline code, code blocks with language specification
+  - Support for numbered lists, bulleted lists, and nested lists
+  - Support for links with and without descriptions
+  - Support for example blocks
+- New module =go-jira-comment.el= for comment functionality
+- Test suite for Org-to-Jira conversion in =test/go-jira-comment-tests.el=
+- Comprehensive documentation in =COMMENT-FEATURE.md=
+
+** Changed
+- Updated =go-jira-view-mode= help message to include comment command
+- Updated =go-jira-board-view-mode= help message to include comment command
+- Updated =readme.org= with comment feature documentation
+
+** Technical
+- Comment submission uses temporary files to avoid shell escaping issues
+- Placeholder-based protection mechanism prevents conversion conflicts
+- Overlay management inspired by gptel's tool-use interface
+- Automatic view refresh after successful comment submission
+
+* [[0.1.0]] - Initial Release
+
+** Added
+- =go-jira-view-ticket= - View Jira tickets in Org-mode format
+- =go-jira-display-board= - Browse and view Jira boards
+- =go-jira-search= - Search Jira issues with consult integration
+- Jira markup to Org-mode conversion
+- Eldoc integration for showing ticket summaries at point
+- Embark integration for ticket numbers
+- Support for subtasks and linked items
+- Comment viewing (read-only)
