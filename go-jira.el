@@ -305,7 +305,10 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                       (insert (format "*** %s - %s\n"
                                       (or author-name "Unknown")
                                       (or timestamp created "")))
-                      (insert (go-jira-markup-to-org body))
+                      ;; Only convert if body has markup
+                      (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
+                          (insert (go-jira-markup-to-org body))
+                        (insert body))
                       (insert "\n\n"))))))
             (go-jira-view-mode)
             (put 'go-jira--ticket-number 'permanent-local t)

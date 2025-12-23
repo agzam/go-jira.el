@@ -443,9 +443,13 @@ will have BASE-LEVEL asterisks added to it."
                                       (make-string comment-author-level ?*)
                                       (or author-name "Unknown")
                                       (or timestamp-link timestamp "")))
-                      (let ((converted (go-jira-markup-to-org body)))
-                        (when converted
-                          (insert (go-jira--adjust-heading-levels converted comment-author-level))))
+                      ;; Only convert if body actually has markup
+                      (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
+                          (let ((converted (go-jira-markup-to-org body)))
+                            (when converted
+                              (insert (go-jira--adjust-heading-levels converted comment-author-level))))
+                        ;; Plain text comment, insert as-is
+                        (insert body))
                       (insert "\n"))))))
             
             ;; Ensure proper separation from next heading

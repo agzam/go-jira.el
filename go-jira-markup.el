@@ -393,32 +393,44 @@ e.g., 2025-12-04T22:20:04.549+0100 → [2025-12-04 Thu 22:20]"
   "Convert JIRA-TEXT (Jira wiki markup) to Org-mode format.
 Returns the converted text as a string."
   (when (and jira-text (not (string-empty-p jira-text)))
-    (setq go-jira-markup--protected-blocks nil)
-    (let ((text jira-text))
-      ;; Phase 1: Protect and convert code blocks
-      (setq text (go-jira-markup--convert-code-blocks text))
-      
-      ;; Phase 2: Inline conversions (BEFORE lists, so strikethrough works in list items)
-      (setq text (go-jira-markup--convert-inline-formatting text))
-      (setq text (go-jira-markup--convert-links text))
-      (setq text (go-jira-markup--convert-images text))
-      (setq text (go-jira-markup--convert-colors text))
-      (setq text (go-jira-markup--convert-datetimes text))
-      
-      ;; Phase 3: Block-level conversions
-      (setq text (go-jira-markup--convert-quote-blocks text))
-      (setq text (go-jira-markup--convert-headings text))
-      (setq text (go-jira-markup--convert-lists text))
-      (setq text (go-jira-markup--convert-tables text))
-      
-      ;; Phase 4: Restore protected blocks
-      (setq text (go-jira-markup--restore-blocks text))
-      
-      ;; Phase 5: Clean up whitespace
-      (setq text (go-jira-markup--clean-whitespace text))
-      
-      ;; Trim trailing whitespace
-      (string-trim-right text))))
+    ;; Fast path: if text has no markup, return as-is
+    (if (not (string-match-p "[{*_#+h-]\\|\\[\\[" jira-text))
+        jira-text
+      ;; Has markup, do full conversion
+      (setq go-jira-markup--protected-blocks nil)
+      (let ((text jira-text))
+        ;; Phase 1: Protect and convert code blocks
+        (when (string-match-p "{\\(?:code\\|noformat\\)}" text)
+          (setq text (go-jira-markup--convert-code-blocks text)))
+        
+        ;; Phase 2: Inline conversions (BEFORE lists, so strikethrough works in list items)
+        (setq text (go-jira-markup--convert-inline-formatting text))
+        (when (string-match-p "\\[" text)
+          (setq text (go-jira-markup--convert-links text))
+          (setq text (go-jira-markup--convert-images text)))
+        (when (string-match-p "{\\(?:color\\|quote\\)}" text)
+          (setq text (go-jira-markup--convert-colors text))
+          (setq text (go-jira-markup--convert-quote-blocks text)))
+        (when (string-match-p "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}T" text)
+          (setq text (go-jira-markup--convert-datetimes text)))
+        
+        ;; Phase 3: Block-level conversions
+        (when (string-match-p "^h[1-6]\\." text)
+          (setq text (go-jira-markup--convert-headings text)))
+        (when (string-match-p "^[*#]+ " text)
+          (setq text (go-jira-markup--convert-lists text)))
+        (when (string-match-p "^|" text)
+          (setq text (go-jira-markup--convert-tables text)))
+        
+        ;; Phase 4: Restore protected blocks
+        (when go-jira-markup--protected-blocks
+          (setq text (go-jira-markup--restore-blocks text)))
+        
+        ;; Phase 5: Clean up whitespace
+        (setq text (go-jira-markup--clean-whitespace text))
+        
+        ;; Trim trailing whitespace
+        (string-trim-right text)))))
 
 (defun go-jira-markup--clean-whitespace (text)
   "Clean up excessive whitespace in TEXT.
