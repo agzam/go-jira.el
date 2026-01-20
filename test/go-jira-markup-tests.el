@@ -196,7 +196,66 @@ some code
 {code}"))
         (let ((result (go-jira-markup-to-org input)))
           (expect result :to-match "#\\+begin_src")
-          (expect result :to-match "some code"))))))
+          (expect result :to-match "some code")))))
+  
+  (describe "quote and code block fixes (SAC-28844)"
+    
+    (it "strips quotes wrapping noformat blocks instead of nesting"
+      (let ((input "{quote}{noformat}code here{noformat}{quote}"))
+        (let ((result (go-jira-markup-to-org input)))
+          ;; Should NOT contain #+begin_quote
+          (expect result :not :to-match "#\\+begin_quote")
+          ;; Should contain #+begin_example
+          (expect result :to-match "#\\+begin_example")
+          (expect result :to-match "code here")
+          (expect result :to-match "#\\+end_example"))))
+    
+    (it "strips quotes wrapping code blocks instead of nesting"
+      (let ((input "{quote}{code:python}print('hello'){code}{quote}"))
+        (let ((result (go-jira-markup-to-org input)))
+          ;; Should NOT contain #+begin_quote
+          (expect result :not :to-match "#\\+begin_quote")
+          ;; Should contain #+begin_src
+          (expect result :to-match "#\\+begin_src python")
+          (expect result :to-match "print('hello')")
+          (expect result :to-match "#\\+end_src"))))
+    
+    (it "ensures #+end_quote is on its own line"
+      (let ((input "{quote}some quote{quote}"))
+        (let ((result (go-jira-markup-to-org input)))
+          ;; Check that end_quote is preceded by a newline
+          (expect result :to-match "some quote\n#\\+end_quote"))))
+    
+    (it "ensures #+end_example is on its own line"
+      (let ((input "{noformat}example text{noformat}"))
+        (let ((result (go-jira-markup-to-org input)))
+          ;; Check that end_example is preceded by a newline
+          (expect result :to-match "example text\n#\\+end_example"))))
+    
+    (it "ensures #+begin blocks are on their own line when in list items"
+      (let ((input "* Item {noformat}code{noformat}"))
+        (let ((result (go-jira-markup-to-org input)))
+          ;; The block should be on a new line after "Item"
+          (expect result :to-match "- Item")
+          (expect result :to-match "#\\+begin_example")
+          ;; Make sure they're not on the same line
+          (expect result :not :to-match "- Item #\\+begin_example"))))
+    
+    (it "handles real-world example from SAC-28844"
+      (let ((input "{quote}{noformat}    def get_properties(self):
+        return {
+            'start_date' : datetime.strftime(datetime.today()-timedelta(days=5), self.START_DATE_FORMAT)
+        }{noformat}{quote}"))
+        (let ((result (go-jira-markup-to-org input)))
+          ;; Should NOT contain #+begin_quote (quote stripped)
+          (expect result :not :to-match "#\\+begin_quote")
+          ;; Should contain properly formatted example block
+          (expect result :to-match "#\\+begin_example")
+          (expect result :to-match "def get_properties")
+          (expect result :to-match "#\\+end_example")
+          ;; Verify proper line breaks
+          (expect result :to-match "\\`\n?#\\+begin_example\n")
+          (expect result :to-match "\n#\\+end_example"))))))
 
 (provide 'go-jira-markup-tests)
 ;;; go-jira-markup-tests.el ends here

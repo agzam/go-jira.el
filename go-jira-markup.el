@@ -52,14 +52,22 @@ Returns the placeholder string."
 
 (defun go-jira-markup--convert-code-blocks (text)
   "Convert Jira code blocks of TEXT to Org-mode source blocks and protect them.
-Handles {code:lang}...{code} and {noformat}...{noformat}."
+Handles {code:lang}...{code} and {noformat}...{noformat}.
+Also strips surrounding {quote} blocks if they wrap code blocks."
+  ;; First, handle quote-wrapped code/noformat blocks by removing the quotes
+  ;; Pattern: {quote}{code...}...{code}{quote} or {quote}{noformat}...{noformat}{quote}
+  (setq text (replace-regexp-in-string
+              "{quote}\\({\\(?:code\\|noformat\\)[^}]*}\\(?:.\\|\n\\)*?{\\(?:code\\|noformat\\)}\\){quote}"
+              "\\1"
+              text))
+  
   ;; Code blocks with language
   (setq text (replace-regexp-in-string
               "{code:\\([^}]+\\)}\\(\\(?:.\\|\n\\)*?\\){code}"
               (lambda (match)
                 (let* ((lang (match-string 1 match))
                        (content (match-string 2 match))
-                       (org-block (format "#+begin_src %s\n%s\n#+end_src" lang content)))
+                       (org-block (format "\n#+begin_src %s\n%s\n#+end_src\n" lang content)))
                   (go-jira-markup--protect-block org-block)))
               text))
   
@@ -68,7 +76,7 @@ Handles {code:lang}...{code} and {noformat}...{noformat}."
               "{code}\\(\\(?:.\\|\n\\)*?\\){code}"
               (lambda (match)
                 (let* ((content (match-string 1 match))
-                       (org-block (format "#+begin_src\n%s\n#+end_src" content)))
+                       (org-block (format "\n#+begin_src\n%s\n#+end_src\n" content)))
                   (go-jira-markup--protect-block org-block)))
               text))
   
@@ -77,7 +85,7 @@ Handles {code:lang}...{code} and {noformat}...{noformat}."
               "{noformat}\\(\\(?:.\\|\n\\)*?\\){noformat}"
               (lambda (match)
                 (let* ((content (match-string 1 match))
-                       (org-block (format "#+begin_example\n%s\n#+end_example" content)))
+                       (org-block (format "\n#+begin_example\n%s\n#+end_example\n" content)))
                   (go-jira-markup--protect-block org-block)))
               text))
   
@@ -89,13 +97,13 @@ Handles both {quote}...{quote} and bq. syntax."
   ;; Multi-line quotes
   (setq text (replace-regexp-in-string
               "{quote}\\(\\(?:.\\|\n\\)*?\\){quote}"
-              "#+begin_quote\n\\1#+end_quote"
+              "\n#+begin_quote\n\\1\n#+end_quote\n"
               text))
   
   ;; Single-line block quotes
   (setq text (replace-regexp-in-string
               "^bq\\. \\(.+\\)$"
-              "#+begin_quote\n\\1\n#+end_quote"
+              "\n#+begin_quote\n\\1\n#+end_quote\n"
               text))
   
   text)
@@ -159,6 +167,8 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
                (bullet-indent (+ num-indent (* (1- (length prefix2)) 2)))
                (indent (make-string bullet-indent ?\s)))
           (setq last-was-nested 'hash-star)
+          ;; Ensure any #+begin blocks in content are on their own line
+          (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s- %s" indent content) result)))
        
        ;; *# pattern: numbered item nested under bullet  
@@ -173,6 +183,8 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
                (counter (1+ (gethash level-key counters 0))))
           (puthash level-key counter counters)
           (setq last-was-nested 'star-hash)
+          ;; Ensure any #+begin blocks in content are on their own line
+          (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s%d. %s" indent counter content) result)))
        
        ;; Numbered list: # → 1., ## → "  1."
@@ -189,6 +201,8 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
                        (puthash k 0 counters)))
                    counters)
           (setq last-was-nested nil)
+          ;; Ensure any #+begin blocks in content are on their own line
+          (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s%d. %s" indent counter content) result)))
        
        ;; Bulleted list: * → -, ** → "  -"
@@ -197,6 +211,8 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
                (content (match-string 2 line))
                (indent (make-string (* (1- (length level)) 2) ?\s)))
           (setq last-was-nested nil)
+          ;; Ensure any #+begin blocks in content are on their own line
+          (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s- %s" indent content) result)))
        
        ;; Empty line or non-list content - reset
