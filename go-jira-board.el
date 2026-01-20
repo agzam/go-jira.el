@@ -29,8 +29,9 @@
   :group 'go-jira)
 
 (defcustom go-jira-board-show-active-sprint-only t
-  "When non-nil, show only issues in the active sprint.
-When nil, show all issues matching the board's filter."
+  "When non-nil, show only issues in the active sprint(s).
+When nil, show all issues on the board (matching the board's filter).
+Note: When enabled, this fetches issues from all active sprints on the board."
   :type 'boolean
   :group 'go-jira)
 
@@ -119,9 +120,9 @@ Returns an alist of (column-name . (status-id-list))."
       (error
        (error "Failed to fetch filter JQL for filter %s: %s" filter-id (error-message-string err))))))
 
-(defun go-jira--fetch-active-sprint (board-id)
-  "Fetch active sprint ID for BOARD-ID.
-Returns the sprint ID or nil if no active sprint."
+(defun go-jira--fetch-active-sprints (board-id)
+  "Fetch active sprint IDs for BOARD-ID.
+Returns a list of sprint IDs, or nil if no active sprints."
   (let* ((j (go-jira--find-exe))
          (endpoint (format "/rest/agile/1.0/board/%d/sprint?state=active" board-id))
          (cmd (format "%s request '%s' --method GET" j endpoint))
@@ -132,10 +133,10 @@ Returns the sprint ID or nil if no active sprint."
                (json-array-type 'list)
                (parsed (json-read-from-string output))
                (sprints (gethash 'values parsed)))
-          (when (and sprints (> (length sprints) 0))
-            (gethash 'id (car sprints))))
+          (when sprints
+            (mapcar (lambda (sprint) (gethash 'id sprint)) sprints)))
       (error
-       (message "Warning: Could not fetch active sprint: %s" (error-message-string err))
+       (message "Warning: Could not fetch active sprints: %s" (error-message-string err))
        nil))))
 
 (defun go-jira--board-candidate (board)
@@ -160,9 +161,9 @@ Returns a plist with all board information including JQL and columns."
          (jql (when filter-id
                 (message "Fetching filter query...")
                 (go-jira--fetch-filter-jql filter-id)))
-         (active-sprint-id (progn
-                             (message "Fetching active sprint...")
-                             (go-jira--fetch-active-sprint board-id))))
+         (active-sprint-ids (progn
+                              (message "Fetching active sprints...")
+                              (go-jira--fetch-active-sprints board-id))))
     (message "Board data retrieved")
     (list :id board-id
           :name name
@@ -171,16 +172,78 @@ Returns a plist with all board information including JQL and columns."
           :filter-id filter-id
           :jql jql
           :columns columns
-          :active-sprint-id active-sprint-id)))
+          :active-sprint-ids active-sprint-ids)))
 
 ;;; Issue fetching and board display
+
+(defun go-jira--fetch-board-issues (board-id &optional sprint-ids)
+  "Fetch all issues for BOARD-ID using the Jira board API.
+If SPRINT-IDS (a list) is provided, fetch issues from those sprints.
+Handles pagination automatically. Returns a list of issue plists."
+  (let* ((j (go-jira--find-exe))
+         (all-issues '()))
+    (if sprint-ids
+        ;; Fetch from multiple sprints and combine
+        (dolist (sprint-id sprint-ids)
+          (let ((start-at 0)
+                (max-results 100)
+                (total nil))
+            (while (or (null total) (< start-at total))
+              (let* ((endpoint (format "/rest/agile/1.0/board/%d/sprint/%d/issue?startAt=%d&maxResults=%d" 
+                                       board-id sprint-id start-at max-results))
+                     (cmd (format "%s request '%s' --method GET" j endpoint))
+                     (output (shell-command-to-string cmd)))
+                (condition-case err
+                    (let* ((json-object-type 'hash-table)
+                           (json-key-type 'symbol)
+                           (json-array-type 'list)
+                           (parsed (json-read-from-string output))
+                           (issues (gethash 'issues parsed))
+                           (returned (length issues)))
+                      (setq total (gethash 'total parsed))
+                      (when issues
+                        (setq all-issues (append all-issues (mapcar #'go-jira--parse-issue issues))))
+                      (setq start-at (+ start-at returned))
+                      (when (zerop returned)
+                        (setq start-at total)))
+                  (error
+                   (error "Failed to fetch sprint issues: %s\nOutput: %s" 
+                          (error-message-string err) output)))))))
+      ;; Fetch all board issues (no sprint filter)
+      (let ((start-at 0)
+            (max-results 100)
+            (total nil))
+        (while (or (null total) (< start-at total))
+          (let* ((endpoint (format "/rest/agile/1.0/board/%d/issue?startAt=%d&maxResults=%d" 
+                                   board-id start-at max-results))
+                 (cmd (format "%s request '%s' --method GET" j endpoint))
+                 (output (shell-command-to-string cmd)))
+            (condition-case err
+                (let* ((json-object-type 'hash-table)
+                       (json-key-type 'symbol)
+                       (json-array-type 'list)
+                       (parsed (json-read-from-string output))
+                       (issues (gethash 'issues parsed))
+                       (returned (length issues)))
+                  (setq total (gethash 'total parsed))
+                  (when issues
+                    (setq all-issues (append all-issues (mapcar #'go-jira--parse-issue issues))))
+                  (setq start-at (+ start-at returned))
+                  (when (zerop returned)
+                    (setq start-at total)))
+              (error
+               (error "Failed to fetch board issues: %s\nOutput: %s" 
+                      (error-message-string err) output)))))))
+    (message "Fetched %d issues from board" (length all-issues))
+    all-issues))
 
 (defun go-jira--fetch-issues-by-jql (jql &optional limit)
   "Fetch issues matching JQL query.
 Returns a list of issue plists with :key, :summary, :status, etc.
-Optional LIMIT restricts number of results (default: no limit)."
+Optional LIMIT restricts number of results (default: 1000)."
   (let* ((j (go-jira--find-exe))
-         (limit-arg (if limit (format " --limit %d" limit) ""))
+         ;; Default to 1000 if no limit specified to ensure we get all results
+         (limit-arg (format " --limit %d" (or limit 1000)))
          (cmd (format "%s list --query '%s' --queryfields 'key,summary,status,assignee,priority,labels,issuetype' --template json%s"
                       j jql limit-arg))
          (output (shell-command-to-string cmd)))
@@ -545,38 +608,26 @@ to display the board immediately."
 (defun go-jira-display-board (&optional board-data)
   "Display a Jira board in `org-mode' format.
 If BOARD-DATA is not provided, prompts for board selection via
-`go-jira-browse-boards'. BOARD-DATA should be a plist with :jql
+`go-jira-browse-boards'. BOARD-DATA should be a plist with :id
 and :columns keys.
 
-When `go-jira-board-show-active-sprint-only' is non-nil (default),
-only shows issues in the active sprint."
+When `go-jira-board-show-active-sprint-only' is non-nil,
+only shows issues in the active sprints. Otherwise shows all
+issues on the board."
   (interactive)
   (let ((board-data (or board-data (go-jira-browse-boards))))
     (unless board-data
       (user-error "No board selected"))
-    (let* ((base-jql (plist-get board-data :jql))
-           (active-sprint-id (plist-get board-data :active-sprint-id))
-           ;; Extract ORDER BY clause if present
-           (order-by-regex "\\s-+ORDER\\s-+BY\\s-+.+$")
-           (has-order-by (string-match-p order-by-regex base-jql))
-           (jql-without-order (if has-order-by
-                                  (replace-regexp-in-string order-by-regex "" base-jql)
-                                base-jql))
-           (order-by-clause (when has-order-by
-                              (string-match order-by-regex base-jql)
-                              (match-string 0 base-jql)))
-           (jql (if (and go-jira-board-show-active-sprint-only active-sprint-id)
-                    (format "(%s) AND Sprint = %d%s"
-                            jql-without-order
-                            active-sprint-id
-                            (or order-by-clause ""))
-                  base-jql)))
-      (unless base-jql
-        (user-error "No JQL query found for board: %s" (plist-get board-data :name)))
-      (when (and go-jira-board-show-active-sprint-only (not active-sprint-id))
-        (message "Warning: No active sprint found, showing all issues"))
+    (let* ((board-id (plist-get board-data :id))
+           (active-sprint-ids (plist-get board-data :active-sprint-ids))
+           (sprint-ids (when go-jira-board-show-active-sprint-only 
+                         active-sprint-ids)))
+      (when (and go-jira-board-show-active-sprint-only (not active-sprint-ids))
+        (message "Warning: No active sprints found, showing all board issues"))
+      (when (and sprint-ids (> (length sprint-ids) 1))
+        (message "Fetching issues from %d active sprints..." (length sprint-ids)))
       (message "Fetching issues for board: %s..." (plist-get board-data :name))
-      (let* ((issues (go-jira--fetch-issues-by-jql jql))
+      (let* ((issues (go-jira--fetch-board-issues board-id sprint-ids))
              (buf (go-jira--build-board-buffer board-data issues)))
         (switch-to-buffer buf)
         (message "Loaded %d issues. Press 'C-c C-c' for columns view." (length issues))))))
