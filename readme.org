@@ -20,17 +20,30 @@ You can still grab it directly from GitHub, here's the example Doom config:
             :files ("*.el"))))
 #+end_src
 
+** Prerequisites
+Of course you'd need go-jira CLI installed, follow [[https://github.com/go-jira/jira][the instructions]]
+
+*** Auth
+It depends on the type of Jira instance you're trying to access. The package doesn't do anything here, so you *must* sort that out with the CLI first - make sure ~jira view <SOME-TICKET-NUMBER>~ in terminal works, before trying any go-jira Emacs commands.
 
 * Features:
 
- - Show description of a ticket when cursor is at point of a text matching Jira ticket number, e.g., "XYZ-12345" - ~go-jira-popup-mode~
+- ~go-jira-popup-mode~ - shows description of a ticket when cursor is at point of a text matching Jira ticket number
 
-   - That also works in TUI only - ~go-jira-eldoc-mode~
+  - in TUI, instead of the popup there's an option - ~go-jira-eldoc-mode~
 
- - ~go-jira-view-ticket~ command - shows the ticket description, subtasks, linked items and comments in a an Org-mode outline
+- ~go-jira-view-ticket~ - shows the ticket description, subtasks, linked items and comments
 
- - ~go-jira-display-board~ - consult picker that allows you to find a board and display the list of tickets on the board, again in an Org-mode outline. Whenever any headline gets expanded, it fetches individual ticket data while parsing jira markup to org-mode format.
+- ~go-jira-display-board~ - consult picker that allows you to find a board and display the list of tickets on the board. 
 
- - ~go-jira-add-comment~ (bound to =C= in both view and board modes) - adds comments to tickets with an overlay-based UI inspired by gptel. Write your comment in Org-mode format (with support for headings, bold, italic, code blocks, links, lists, etc.) and it will be automatically converted to Jira markup when submitted. Press =C-c C-c= to submit or =C-c C-k= to abort.
+- ~go-jira-browse-default-board~ - most of the time you'd want to quickly jump to one specific board. When you run the command for the first time, it would prompt you to pick a board from the list and sets the ~go-jira-default-board-id~.
+
+  You can set it manually:
+
+  1. Open your board: =M-x go-jira-browse-boards= → select “SAC Pipeline (Pod 2)”
+  2. In that buffer, evaluate: =M-: go-jira--board-data RET=
+  3. Look for =:id 3018= (or whatever number) in the output
+
+- ~go-jira-add-comment~ (bound to =C= in both view and board modes) - adds comments to tickets. Write your comment in Org-mode format (with support for headings, bold, italic, code blocks, links, lists, etc.) and it will be automatically gets converted to Jira markup when submitted.
      
 - Embark integration - adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.

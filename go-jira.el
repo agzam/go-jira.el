@@ -155,7 +155,9 @@ e.g., XYZ-1234 becomes XYZ-1234 - This ticket does nothing"
                              (looking-at-p (concat ticket-regex " - '.*'")))))
          (sum+url (go-jira--summary+url ticket))
          (summary (plist-get sum+url :summary))
-         (result (format "%s - '%s'" ticket summary)))
+         (result (if (derived-mode-p 'org-mode)
+                     (format "%s - ~%s~" ticket summary)
+                  (format "%s - '%s'" ticket summary))))
     (if ticket-arg
         result
       (unless already-desc-p

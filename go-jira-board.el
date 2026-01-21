@@ -42,6 +42,22 @@ has expired. Set to 0 to always fetch fresh data."
   :type 'integer
   :group 'go-jira)
 
+(defcustom go-jira-default-board-id nil
+  "Default board ID for quick access via `go-jira-browse-default-board'.
+Set this to your most frequently used board ID to jump directly to it
+without board selection. You can find the board ID in the board URL or by
+inspecting the board-data plist from `go-jira-browse-boards'."
+  :type '(choice (const :tag "None" nil)
+                 (integer :tag "Board ID"))
+  :group 'go-jira)
+
+(defcustom go-jira-default-board-name nil
+  "Default board name corresponding to `go-jira-default-board-id'.
+This is used for display purposes and to construct the buffer name."
+  :type '(choice (const :tag "None" nil)
+                 (string :tag "Board Name"))
+  :group 'go-jira)
+
 ;;; Internal board API functions
 
 (defun go-jira--fetch-boards (project)
@@ -605,7 +621,7 @@ to display the board immediately."
         board-data))))
 
 ;;;###autoload
-(defun go-jira-display-board (&optional board-data)
+(defun go-jira-display-board (&optional board-data force-refresh)
   "Display a Jira board in `org-mode' format.
 If BOARD-DATA is not provided, prompts for board selection via
 `go-jira-browse-boards'. BOARD-DATA should be a plist with :id
@@ -613,24 +629,94 @@ and :columns keys.
 
 When `go-jira-board-show-active-sprint-only' is non-nil,
 only shows issues in the active sprints. Otherwise shows all
-issues on the board."
-  (interactive)
+issues on the board.
+
+If a buffer for this board already exists and FORCE-REFRESH is nil,
+simply switches to that buffer without re-fetching data. Use
+FORCE-REFRESH non-nil to force fetching fresh data.
+
+When called interactively, uses prefix argument to force refresh."
+  (interactive (list nil current-prefix-arg))
   (let ((board-data (or board-data (go-jira-browse-boards))))
     (unless board-data
       (user-error "No board selected"))
-    (let* ((board-id (plist-get board-data :id))
-           (active-sprint-ids (plist-get board-data :active-sprint-ids))
-           (sprint-ids (when go-jira-board-show-active-sprint-only 
-                         active-sprint-ids)))
-      (when (and go-jira-board-show-active-sprint-only (not active-sprint-ids))
-        (message "Warning: No active sprints found, showing all board issues"))
-      (when (and sprint-ids (> (length sprint-ids) 1))
-        (message "Fetching issues from %d active sprints..." (length sprint-ids)))
-      (message "Fetching issues for board: %s..." (plist-get board-data :name))
-      (let* ((issues (go-jira--fetch-board-issues board-id sprint-ids))
-             (buf (go-jira--build-board-buffer board-data issues)))
-        (switch-to-buffer buf)
-        (message "Loaded %d issues. Press 'C-c C-c' for columns view." (length issues))))))
+    (let* ((board-name (plist-get board-data :name))
+           (buf-name (format "*Jira Board: %s*" board-name))
+           (existing-buf (get-buffer buf-name)))
+      ;; If buffer exists and we're not forcing a refresh, just switch to it
+      (if (and existing-buf (not force-refresh))
+          (progn
+            (switch-to-buffer existing-buf)
+            (message "Switched to existing board buffer. Press 'r' to refresh or use C-u to force refresh."))
+        ;; Otherwise, fetch and rebuild
+        (let* ((board-id (plist-get board-data :id))
+               (active-sprint-ids (plist-get board-data :active-sprint-ids))
+               (sprint-ids (when go-jira-board-show-active-sprint-only 
+                             active-sprint-ids)))
+          (when (and go-jira-board-show-active-sprint-only (not active-sprint-ids))
+            (message "Warning: No active sprints found, showing all board issues"))
+          (when (and sprint-ids (> (length sprint-ids) 1))
+            (message "Fetching issues from %d active sprints..." (length sprint-ids)))
+          (message "Fetching issues for board: %s..." board-name)
+          (let* ((issues (go-jira--fetch-board-issues board-id sprint-ids))
+                 (buf (go-jira--build-board-buffer board-data issues)))
+            (switch-to-buffer buf)
+            (message "Loaded %d issues. Press 'C-c C-c' for columns view." (length issues))))))))
+
+;;;###autoload
+(defun go-jira-set-default-board ()
+  "Interactively select and set your default board.
+Prompts for board selection and then sets `go-jira-default-board-id'
+and `go-jira-default-board-name' for use with `go-jira-browse-default-board'."
+  (interactive)
+  (let ((board-data (go-jira-browse-boards nil nil)))
+    (when board-data
+      (customize-save-variable 'go-jira-default-board-id (plist-get board-data :id))
+      (customize-save-variable 'go-jira-default-board-name (plist-get board-data :name))
+      (message "Default board set to: %s (ID: %d)" 
+               go-jira-default-board-name 
+               go-jira-default-board-id))))
+
+;;;###autoload
+(defun go-jira-browse-default-board (&optional force-refresh)
+  "Jump to or refresh your default Jira board.
+Uses `go-jira-default-board-id' and `go-jira-default-board-name'.
+If these are not set, prompts to browse and select a board.
+
+If a buffer for the default board already exists, switches to it.
+With prefix argument FORCE-REFRESH, fetches fresh data even if
+the buffer exists.
+
+This is a convenience command for quickly accessing your most
+frequently used board without going through board selection."
+  (interactive "P")
+  (if (and go-jira-default-board-id go-jira-default-board-name)
+      (let* ((buf-name (format "*Jira Board: %s*" go-jira-default-board-name))
+             (existing-buf (get-buffer buf-name)))
+        (if (and existing-buf (not force-refresh))
+            (progn
+              (switch-to-buffer existing-buf)
+              (message "Switched to default board: %s. Press 'r' to refresh." go-jira-default-board-name))
+          ;; Need to fetch board data
+          (message "Fetching default board: %s..." go-jira-default-board-name)
+          (let* ((config (go-jira--fetch-board-config go-jira-default-board-id))
+                 (filter-id (plist-get config :filter-id))
+                 (columns (plist-get config :columns))
+                 (jql (when filter-id (go-jira--fetch-filter-jql filter-id)))
+                 (active-sprint-ids (go-jira--fetch-active-sprints go-jira-default-board-id))
+                 (board-data (list :id go-jira-default-board-id
+                                   :name go-jira-default-board-name
+                                   :type "scrum"  ; We don't store type, assume scrum
+                                   :project go-jira-default-project
+                                   :filter-id filter-id
+                                   :jql jql
+                                   :columns columns
+                                   :active-sprint-ids active-sprint-ids)))
+            (go-jira-display-board board-data t))))
+    ;; No default board configured, fall back to browse
+    (message "No default board configured. Use M-x go-jira-set-default-board to configure one.")
+    (when (y-or-n-p "No default board configured. Set one now? ")
+      (call-interactively #'go-jira-set-default-board))))
 
 (provide 'go-jira-board)
 ;;; go-jira-board.el ends here
