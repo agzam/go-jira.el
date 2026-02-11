@@ -33,6 +33,7 @@
 (require 'markdown-mode)
 (require 's)
 (require 'go-jira-comment)
+(require 'go-jira-description)
 
 (defgroup go-jira nil
   "Emacs interface to go-jira CLI tool."
@@ -213,6 +214,7 @@ becomes SAC-28812__add_new_metadata_tap-asana"
     (define-key map (kbd "C-c C-u") #'go-jira-view-mode-copy-url)
     (define-key map (kbd "r") #'go-jira-view-mode-refresh)
     (define-key map (kbd "C") #'go-jira-add-comment)
+    (define-key map (kbd "E") #'go-jira-edit-description)
     (define-key map (kbd "q") #'kill-buffer-and-window)
     map)
   "Keymap for `go-jira-view-mode'.")
@@ -221,13 +223,17 @@ becomes SAC-28812__add_new_metadata_tap-asana"
   "Major mode for viewing Jira tickets in 'org-mode' format.
 \\{go-jira-view-mode-map}"
   :group 'go-jira
+  (require 'go-jira-description)
   (setq-local buffer-read-only t)
   
   ;; Add font-lock for Jira headings
   (font-lock-add-keywords nil
    '((go-jira--fontify-jira-headings)))
   
-  (message "Press 'C-c C-o' to open in browser, 'C' to add comment, 'r' to refresh, 'q' to quit"))
+  ;; Add hook for description editing
+  (add-hook 'read-only-mode-hook #'go-jira-description--read-only-change-hook nil t)
+  
+  (message "Jira ticket view loaded"))
 
 (defun go-jira-view-mode-open-browser ()
   "Open ticket in browser from jira view mode."
