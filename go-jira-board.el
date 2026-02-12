@@ -360,10 +360,8 @@ STATE is the visibility state after cycling."
                                    current-time))))
         (when cache-expired
           (message "Fetching content for %s..." key)
-          (save-excursion
-            (go-jira--fetch-and-insert-issue-content key))
-          (org-cycle-hide-drawers nil)
-          (puthash key current-time go-jira--expanded-issues))))))
+          (puthash key current-time go-jira--expanded-issues)
+          (go-jira--fetch-and-insert-issue-content-async key (current-buffer)))))))
 
 (defun go-jira--fetch-issue-details (issue-key)
   "Fetch detailed issue information for ISSUE-KEY as JSON.
@@ -431,46 +429,58 @@ are left untouched.  Uses `org-element' to identify real headings."
             (replace-match (concat (make-string (+ level base-level) ?*) " "))))))
     (buffer-string)))
 
-(defun go-jira--fetch-and-insert-issue-content (issue-key)
-  "Fetch and insert content for ISSUE-KEY at current heading."
-  (let ((details (go-jira--fetch-issue-details issue-key)))
-    (when details
+(defun go-jira--insert-issue-content (issue-key details subtasks linked-items buffer)
+  "Insert fetched DETAILS for ISSUE-KEY into BUFFER at the issue heading.
+SUBTASKS and LINKED-ITEMS are optional strings.  DETAILS is a plist with
+:description, :comments, and :self-url."
+  (when (and details (buffer-live-p buffer))
+    (with-current-buffer buffer
       (save-excursion
+        ;; Find the heading for this issue-key
+        (goto-char (point-min))
+        (unless (re-search-forward
+                 (format "^\\(\\*+\\) %s:" (regexp-quote issue-key)) nil t)
+          (error "Could not find heading for %s" issue-key))
         (org-back-to-heading t)
         (let* ((current-level (org-outline-level))
-               ;; Description and Comments are always 1 level below the issue
                (description-level (1+ current-level))
-               ;; Comment authors are 1 level below Comments
-               (comment-author-level (+ current-level 2)))
+               (comment-author-level (+ current-level 2))
+               ;; Build browse URL from self-url (no API call needed)
+               (self-url (plist-get details :self-url))
+               (base-url (when self-url
+                           (when (string-match "\\(.*\\)/rest/" self-url)
+                             (format "%s/browse/%s" (match-string 1 self-url) issue-key)))))
           (org-end-of-meta-data t)
           (when (looking-at org-property-drawer-re)
             (goto-char (match-end 0))
             (forward-line 1))
+          ;; Remove "Loading..." placeholder if present
+          (when (looking-at "^Loading\\.\\.\\.\n")
+            (let ((inhibit-read-only t))
+              (delete-region (match-beginning 0) (match-end 0))))
           (let ((inhibit-read-only t)
                 (description (plist-get details :description))
                 (comments (plist-get details :comments))
-                ;; Temporarily remove org-fold hook to prevent it from "fixing" visibility
                 (after-change-functions (remove 'org-fold-core--fix-folded-region after-change-functions)))
 
-            ;; Insert description directly (no heading)
+            ;; Insert description
             (when description
               (insert "\n")
               (let ((converted (go-jira-markup-to-org description)))
                 (when converted
-                  ;; Adjust any headings in the description to be relative to current issue level
                   (insert (go-jira--adjust-heading-levels converted current-level)))
                 (insert "\n")))
 
             ;; Insert subtasks
-            (when-let ((subtasks (go-jira--fetch-subtasks issue-key)))
+            (when subtasks
               (insert (format "%s Subtasks\n" (make-string description-level ?*)))
               (insert subtasks)
               (insert "\n\n"))
 
             ;; Insert linked items
-            (when-let ((linked (go-jira--fetch-linked-items issue-key)))
+            (when linked-items
               (insert (format "%s Linked work items\n" (make-string description-level ?*)))
-              (insert linked)
+              (insert linked-items)
               (insert "\n\n"))
 
             ;; Insert comments
@@ -487,28 +497,121 @@ are left untouched.  Uses `org-element' to identify real headings."
                                         (condition-case nil
                                             (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
                                           (error created))))
-                           ;; Create comment link if we have the comment ID
-                           (timestamp-link (if comment-id
-                                               (let ((base-url (go-jira-ticket->url issue-key)))
-                                                 (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
-                                                         base-url comment-id comment-id timestamp))
+                           (timestamp-link (if (and comment-id base-url)
+                                               (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
+                                                       base-url comment-id comment-id timestamp)
                                              timestamp)))
                       (insert (format "%s %s - %s\n"
                                       (make-string comment-author-level ?*)
                                       (or author-name "Unknown")
                                       (or timestamp-link timestamp "")))
-                      ;; Only convert if body actually has markup
                       (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
                           (let ((converted (go-jira-markup-to-org body)))
                             (when converted
                               (insert (go-jira--adjust-heading-levels converted comment-author-level))))
-                        ;; Plain text comment, insert as-is
                         (insert body))
                       (insert "\n"))))))
 
-            ;; Ensure proper separation from next heading
             (unless (looking-at-p "^\\s-*$")
-              (insert "\n"))))))))
+              (insert "\n"))))
+        (org-cycle-hide-drawers nil)))))
+
+(defun go-jira--fetch-and-insert-issue-content (issue-key)
+  "Fetch and insert content for ISSUE-KEY at current heading (synchronous)."
+  (let ((details (go-jira--fetch-issue-details issue-key))
+        (subtasks (go-jira--fetch-subtasks issue-key))
+        (linked (go-jira--fetch-linked-items issue-key)))
+    (go-jira--insert-issue-content issue-key details subtasks linked (current-buffer))))
+
+(defun go-jira--fetch-and-insert-issue-content-async (issue-key buffer)
+  "Fetch content for ISSUE-KEY asynchronously, then insert into BUFFER.
+Shows a \"Loading...\" placeholder immediately, fires off the jira CLI
+in the background, and fills in real content when the response arrives."
+  ;; Insert placeholder at the issue heading
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (when (re-search-forward
+               (format "^\\(\\*+\\) %s:" (regexp-quote issue-key)) nil t)
+          (org-back-to-heading t)
+          (org-end-of-meta-data t)
+          (when (looking-at org-property-drawer-re)
+            (goto-char (match-end 0))
+            (forward-line 1))
+          (let ((inhibit-read-only t))
+            (insert "Loading...\n"))))))
+
+  ;; Fire off async fetch — all three calls in parallel
+  (let* ((j (go-jira--find-exe))
+         (detail-buf (generate-new-buffer (format " *jira-detail-%s*" issue-key)))
+         (subtask-buf (generate-new-buffer (format " *jira-subtask-%s*" issue-key)))
+         (linked-buf (generate-new-buffer (format " *jira-linked-%s*" issue-key)))
+         ;; Track completion of all 3 processes
+         (pending (list 'details 'subtasks 'linked))
+         (try-finish
+          (lambda ()
+            (when (null pending)
+              ;; All done — parse and insert
+              (condition-case err
+                  (let* ((json-output (with-current-buffer detail-buf (buffer-string)))
+                         (details (condition-case nil
+                                      (let* ((json-object-type 'hash-table)
+                                             (json-key-type 'symbol)
+                                             (json-array-type 'list)
+                                             (parsed (json-read-from-string json-output))
+                                             (self-url (gethash 'self parsed))
+                                             (fields (gethash 'fields parsed))
+                                             (description (when fields (gethash 'description fields)))
+                                             (comment-data (when fields (gethash 'comment fields)))
+                                             (comments (when comment-data (gethash 'comments comment-data))))
+                                        (list :description description
+                                              :comments comments
+                                              :self-url self-url))
+                                    (error nil)))
+                         (subtasks (let ((s (string-trim
+                                            (ansi-color-apply
+                                             (with-current-buffer subtask-buf (buffer-string))))))
+                                    (unless (string-blank-p s) s)))
+                         (linked (let ((s (string-trim
+                                           (ansi-color-apply
+                                            (with-current-buffer linked-buf (buffer-string))))))
+                                   (unless (string-blank-p s) s))))
+                    (go-jira--insert-issue-content issue-key details subtasks linked buffer)
+                    (message "Loaded %s" issue-key))
+                (error
+                 (message "Error loading %s: %s" issue-key (error-message-string err))))
+              ;; Clean up temp buffers
+              (kill-buffer detail-buf)
+              (kill-buffer subtask-buf)
+              (kill-buffer linked-buf)))))
+    ;; Process 1: issue details (JSON)
+    (make-process
+     :name (format "jira-detail-%s" issue-key)
+     :buffer detail-buf
+     :command (list j "view" issue-key "--template" "json")
+     :sentinel (lambda (proc _event)
+                 (when (memq (process-status proc) '(exit signal))
+                   (setq pending (delq 'details pending))
+                   (funcall try-finish))))
+    ;; Process 2: subtasks
+    (make-process
+     :name (format "jira-subtask-%s" issue-key)
+     :buffer subtask-buf
+     :command (list j "list" "--query" (format "parent = %s" issue-key))
+     :sentinel (lambda (proc _event)
+                 (when (memq (process-status proc) '(exit signal))
+                   (setq pending (delq 'subtasks pending))
+                   (funcall try-finish))))
+    ;; Process 3: linked items
+    (make-process
+     :name (format "jira-linked-%s" issue-key)
+     :buffer linked-buf
+     :command (list j "list" "--query" (format "issue in linkedIssues(%s)" issue-key))
+     :sentinel (lambda (proc _event)
+                 (when (memq (process-status proc) '(exit signal))
+                   (setq pending (delq 'linked pending))
+                   (funcall try-finish))))))
 
 (define-derived-mode go-jira-board-view-mode org-mode "Jira-Board"
   "Major mode for viewing Jira boards in `org-mode' format.
