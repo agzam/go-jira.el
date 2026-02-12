@@ -34,6 +34,20 @@
 
 (require 'cl-lib)
 
+;;; Image attachment support
+
+(defvar go-jira-markup--attachment-map nil
+  "Alist of (FILENAME . (:id ID :attrs ATTRS-STRING :cache-path PATH)).
+Bound dynamically by the caller (e.g., `go-jira-view-ticket') to provide
+attachment metadata for image resolution.  The markup layer uses this to
+rewrite Jira `!filename|attrs!' image references to local file paths.
+ATTRS-STRING is the raw Jira attributes (e.g., \"width=535,alt=...\").")
+
+(defvar go-jira-markup--image-widths nil
+  "Alist of (FILENAME . WIDTH-STRING) for the current conversion.
+Populated during Jira→Org pre-processing from image attributes.
+Used during Org post-processing to insert #+ATTR_ORG lines.")
+
 ;;; Pandoc integration
 
 (defvar go-jira-markup--pandoc-exe nil
@@ -160,6 +174,44 @@ Protects elements that Pandoc handles incorrectly:
               (setq in-block nil))))))
     (setq text (concat result (substring text consumed))))
 
+  ;; Protect image references: !filename|attrs! → rewrite to cached path.
+  ;; Jira image syntax: !filename.png! or !filename.png|width=535,alt="..."!
+  ;; Pandoc converts these to [[file:filename.png]], but:
+  ;; 1) Attributes (width, alt) are lost
+  ;; 2) The file path is just the bare filename — we need the cached local path
+  ;; We rewrite them before Pandoc so they point to the cache, and record
+  ;; width attributes for insertion as #+ATTR_ORG after Pandoc runs.
+  ;; External URLs (!http://...!) are left alone — Pandoc handles those fine.
+  (setq go-jira-markup--image-widths nil)
+  (setq text (replace-regexp-in-string
+              "!\\([^!\n|]+\\(?:\\.[a-zA-Z0-9]+\\)\\)\\(?:|\\([^!\n]*\\)\\)?!"
+              (lambda (match)
+                (let* ((filename (match-string 1 match))
+                       (attrs (match-string 2 match))
+                       (attachment (assoc filename go-jira-markup--attachment-map))
+                       (cache-path (when attachment (plist-get (cdr attachment) :cache-path)))
+                       ;; Extract width from attrs.  Must use save-match-data
+                       ;; because string-match clobbers the match data that
+                       ;; replace-regexp-in-string needs for the replacement range.
+                       (width (when attrs
+                                (save-match-data
+                                  (when (string-match "width=\\([0-9]+\\)" attrs)
+                                    (match-string 1 attrs))))))
+                  (if (or (string-prefix-p "http://" filename)
+                          (string-prefix-p "https://" filename))
+                      ;; External URL — leave for Pandoc
+                      match
+                    ;; Record width for #+ATTR_ORG insertion in post-process
+                    (when width
+                      (push (cons (or cache-path filename) width)
+                            go-jira-markup--image-widths))
+                    ;; Rewrite to cache path if we have attachment info
+                    (if cache-path
+                        (format "!%s!" cache-path)
+                      ;; No attachment map or unknown filename — keep bare filename
+                      (format "!%s!" filename)))))
+              text))
+
   ;; Protect superscript: ^text^ → placeholder
   ;; Must not match ^{text} in code blocks (already handled by pandoc)
   (setq text (replace-regexp-in-string
@@ -206,6 +258,29 @@ Restores placeholders to their Org equivalents."
   ;; Restore placeholders - they survived pandoc as literal text
   (setq text (go-jira-markup--restore-placeholders text))
 
+  ;; Normalize image links: Pandoc produces [[path]] for absolute paths but
+  ;; Org needs [[file:path]] to display inline images.  Also insert
+  ;; #+ATTR_ORG: :width when width info was extracted during pre-processing.
+  ;; We handle ALL image links (with and without width), normalizing them
+  ;; to [[file:path]] format.
+  ;;
+  ;; First handle images with recorded width info:
+  (when go-jira-markup--image-widths
+    (dolist (pair go-jira-markup--image-widths)
+      (let* ((path (car pair))
+             (width (cdr pair))
+             ;; Match both [[file:path]] and [[path]]
+             (link-pattern (format "\\[\\[\\(?:file:\\)?%s\\]\\]"
+                                   (regexp-quote path)))
+             (replacement (format "#+ATTR_ORG: :width %s\n[[file:%s]]" width path)))
+        (setq text (replace-regexp-in-string link-pattern replacement text t)))))
+  ;; Then normalize any remaining absolute-path image links without width:
+  ;; [[/some/path/image.png]] → [[file:/some/path/image.png]]
+  (setq text (replace-regexp-in-string
+              "\\[\\[\\(/[^]]*\\.\\(?:png\\|jpe?g\\|gif\\|bmp\\|svg\\|webp\\|ico\\)\\)\\]\\]"
+              "[[file:\\1]]"
+              text))
+
   ;; NOTE: We keep #+begin_src NOLANG as-is in the org output.
   ;; NOLANG is a marker indicating the original Jira {code} block had no
   ;; language.  The org→jira path converts {code:NOLANG} back to {code}.
@@ -219,8 +294,38 @@ Restores placeholders to their Org equivalents."
 Protects elements that Pandoc's Org→Jira writer handles incorrectly:
 - Citation markers «text» → placeholder (to restore as ??text??)
 - Color markers from jira-pre-process → placeholder
-- Underscores in words (to prevent pandoc treating them as subscript/emphasis)"
+- Underscores in words (to prevent pandoc treating them as subscript/emphasis)
+- Image links with cache paths → placeholder (to restore as !filename|attrs!)"
   (setq go-jira-markup--placeholders nil)
+
+  ;; Handle image links: strip #+ATTR_ORG width lines, rewrite cached image
+  ;; paths back to bare filenames with original Jira attributes.
+  ;; #+ATTR_ORG: :width 535
+  ;; [[file:/cache/path/id/image.png]]
+  ;; →  placeholder (restored as !image.png|width=535!)
+  ;;
+  ;; Also handles images without #+ATTR_ORG:
+  ;; [[file:/cache/path/id/image.png]]  →  !image.png!
+  (let ((image-rx (concat "\\(?:^#\\+ATTR_ORG:[[:space:]]+:width[[:space:]]+\\([0-9]+\\)\n\\)?"
+                          "\\[\\[file:\\([^]]+\\)\\]\\]")))
+    (setq text (replace-regexp-in-string
+                image-rx
+                (lambda (match)
+                  (let* ((width (match-string 1 match))
+                         (path (match-string 2 match))
+                         (filename (file-name-nondirectory path))
+                         ;; Only treat as image if extension looks like an image
+                         (image-ext-p (string-match-p
+                                       "\\.\\(png\\|jpe?g\\|gif\\|bmp\\|svg\\|webp\\|ico\\)\\'"
+                                       filename)))
+                    (if image-ext-p
+                        (let ((jira-img (if width
+                                           (format "!%s|width=%s!" filename width)
+                                         (format "!%s!" filename))))
+                          (go-jira-markup--placeholder "IMG" jira-img))
+                      ;; Not an image — leave as-is
+                      match)))
+                text)))
 
   ;; Protect citation markers: /«text»/ → placeholder
   ;; These were inserted during jira→org as the org representation of ??text??

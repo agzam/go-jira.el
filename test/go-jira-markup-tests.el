@@ -849,5 +849,120 @@
       (go-jira-markup--find-pandoc)
       (expect go-jira-markup--pandoc-exe :not :to-be nil))))
 
+;;; Image attachment support
+
+(describe "Image attachments in Jira markup"
+
+  (describe "Jira→Org: basic image conversion"
+
+    (it "converts bare image reference to file link"
+      (let ((result (go-jira-markup-to-org "!screenshot.png!")))
+        (expect result :to-match "\\[\\[file:screenshot.png\\]\\]")))
+
+    (it "converts image with attributes to file link"
+      (let ((result (go-jira-markup-to-org "!image.png|width=535,alt=\"my image\"!")))
+        (expect result :to-match "\\[\\[file:image.png\\]\\]")))
+
+    (it "inserts #+ATTR_ORG :width when width attribute is present"
+      (let ((result (go-jira-markup-to-org "!image.png|width=535!")))
+        (expect result :to-match "#\\+ATTR_ORG: :width 535")
+        (expect result :to-match "\\[\\[file:image.png\\]\\]")))
+
+    (it "does not insert #+ATTR_ORG when no width attribute"
+      (let ((result (go-jira-markup-to-org "!image.png!")))
+        (expect result :not :to-match "ATTR_ORG")))
+
+    (it "preserves external URL images (http)"
+      (let ((result (go-jira-markup-to-org "!http://example.com/pic.png!")))
+        (expect result :to-match "http://example.com/pic.png"))))
+
+  (describe "Jira→Org: image path rewriting with attachment map"
+
+    (it "rewrites filename to cache path when attachment map is bound"
+      (let* ((go-jira-markup--attachment-map
+              '(("image.png" . (:id "12345" :attrs nil
+                                :cache-path "/tmp/test-cache/12345/image.png"))))
+             (result (go-jira-markup-to-org "!image.png!")))
+        (expect result :to-match "/tmp/test-cache/12345/image.png")))
+
+    (it "preserves width attribute when rewriting to cache path"
+      (let* ((go-jira-markup--attachment-map
+              '(("photo.jpg" . (:id "99" :attrs nil
+                                :cache-path "/tmp/cache/99/photo.jpg"))))
+             (result (go-jira-markup-to-org "!photo.jpg|width=300!")))
+        (expect result :to-match "#\\+ATTR_ORG: :width 300")
+        (expect result :to-match "/tmp/cache/99/photo.jpg")))
+
+    (it "leaves unknown filenames as bare names"
+      (let* ((go-jira-markup--attachment-map
+              '(("known.png" . (:id "1" :attrs nil :cache-path "/tmp/1/known.png"))))
+             (result (go-jira-markup-to-org "!unknown.png!")))
+        (expect result :to-match "\\[\\[file:unknown.png\\]\\]")
+        (expect result :not :to-match "/tmp/"))))
+
+  (describe "Org→Jira: image path restoration"
+
+    (it "converts cached image path back to bare filename"
+      (let ((result (go-jira-markup-from-org
+                     "[[file:/tmp/cache/12345/screenshot.png]]")))
+        (expect result :to-match "!screenshot.png!")))
+
+    (it "restores width attribute from #+ATTR_ORG"
+      (let ((result (go-jira-markup-from-org
+                     "#+ATTR_ORG: :width 535\n[[file:/tmp/cache/12345/image.png]]")))
+        (expect result :to-match "!image.png|width=535!")))
+
+    (it "converts bare filename image link back correctly"
+      (let ((result (go-jira-markup-from-org "[[file:photo.jpg]]")))
+        (expect result :to-match "!photo.jpg!")))
+
+    (it "does not mangle non-image file links"
+      (let ((result (go-jira-markup-from-org "[[file:document.pdf]]")))
+        ;; PDF is not an image extension, should pass through to Pandoc
+        (expect result :not :to-match "!document.pdf!"))))
+
+  (describe "Image round-trip: Jira→Org→Jira"
+
+    (it "round-trips bare image reference"
+      (let* ((jira "Some text before.\n\n!screenshot.png!\n\nSome text after.")
+             (org (go-jira-markup-to-org jira))
+             (jira-back (go-jira-markup-from-org org)))
+        (expect jira-back :to-match "!screenshot.png!")))
+
+    (it "round-trips image with width attribute"
+      (let* ((jira "!image.png|width=535!")
+             (org (go-jira-markup-to-org jira))
+             (jira-back (go-jira-markup-from-org org)))
+        (expect jira-back :to-match "!image.png|width=535!")))
+
+    (it "round-trips image with cache path rewriting"
+      (let* ((go-jira-markup--attachment-map
+              '(("image.png" . (:id "12345" :attrs nil
+                                :cache-path "/tmp/cache/12345/image.png"))))
+             (jira "!image.png|width=400!")
+             (org (go-jira-markup-to-org jira))
+             (jira-back (go-jira-markup-from-org org)))
+        (expect org :to-match "/tmp/cache/12345/image.png")
+        (expect org :to-match "#\\+ATTR_ORG: :width 400")
+        (expect jira-back :to-match "!image.png|width=400!")))
+
+    (it "round-trips mixed content: text + image + code block"
+      (let* ((jira (concat "h2. Overview\n\n"
+                           "See this screenshot:\n\n"
+                           "!screenshot.png|width=600!\n\n"
+                           "{code:python}\ndef hello():\n    pass\n{code}"))
+             (org (go-jira-markup-to-org jira))
+             (jira-back (go-jira-markup-from-org org)))
+        (expect jira-back :to-match "!screenshot.png|width=600!")
+        (expect jira-back :to-match "def hello")
+        (expect jira-back :to-match "h2\\.")))
+
+    (it "round-trips image in comment body with surrounding markup"
+      (let* ((jira (concat "rejecting this as it's no longer reproducible:\n\n"
+                           "!image-20260128-204716.png|width=793,alt=\"image-20260128-204716.png\"!"))
+             (org (go-jira-markup-to-org jira))
+             (jira-back (go-jira-markup-from-org org)))
+        (expect jira-back :to-match "!image-20260128-204716.png|width=793!")))))
+
 (provide 'go-jira-markup-tests)
 ;;; go-jira-markup-tests.el ends here

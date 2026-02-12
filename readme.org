@@ -33,7 +33,7 @@ It depends on the type of Jira instance you're trying to access. The package doe
 * Features:
 *** ~go-jira-view-ticket~
 
-Main buffer for ticket overview. Shows the ticket description, subtasks, linked items and comments. You can edit title, description, your comments and add new ones.
+Main buffer for ticket overview. Shows the ticket description, subtasks, linked items and comments, attached images. You can edit title, description, your comments and add new ones.
 
 | Key     | Command                        | Description                         |
 |---------+--------------------------------+-------------------------------------|
@@ -45,7 +45,7 @@ Main buffer for ticket overview. Shows the ticket description, subtasks, linked 
 
 *** ~go-jira-display-board~
 
-Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline with titles, upon expanding it will load individual ticket info. Editing works the same way as in view-ticket buffer.
+Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline of titles, upon expanding each, individual ticket data loads. Editing works the same way as in view-ticket buffer.
   
 | Key     | Command                           | Description                                                |
 |---------+-----------------------------------+------------------------------------------------------------|

@@ -44,6 +44,22 @@
   :type 'string
   :group 'go-jira)
 
+(defcustom go-jira-attachment-cache-dir
+  (expand-file-name "go-jira/attachments" (or (getenv "XDG_CACHE_HOME")
+                                               "~/.cache"))
+  "Directory for caching downloaded Jira attachments.
+Images are stored as CACHE-DIR/ATTACHMENT-ID/FILENAME to avoid
+collisions and enable cache-busting by attachment ID."
+  :type 'directory
+  :group 'go-jira)
+
+(defcustom go-jira-display-images t
+  "When non-nil, download and display inline images in ticket views.
+Images are downloaded asynchronously via `jira attach get' and
+displayed using Org-mode inline image display."
+  :type 'boolean
+  :group 'go-jira)
+
 ;;; Internal utilities
 
 (defun go-jira--find-exe (&optional exe)
@@ -102,6 +118,80 @@ Returns a plist with :ticket, :url, and :summary."
              (summary (gethash 'summary parsed))
              (url (gethash 'url parsed)))
         (list :ticket ticket :url url :summary summary)))))
+
+;;; Attachment / image support
+
+(defun go-jira--parse-attachments (parsed-json)
+  "Extract attachment map from PARSED-JSON (a hash-table from `json-read').
+Returns an alist of (FILENAME . (:id ID :attrs nil :cache-path PATH))
+suitable for binding to `go-jira-markup--attachment-map'."
+  (when-let* ((fields (gethash 'fields parsed-json))
+              (attachments (gethash 'attachment fields)))
+    (let (result)
+      (dolist (att attachments)
+        (let* ((id (gethash 'id att))
+               (filename (gethash 'filename att))
+               (mime (or (gethash 'mimeType att) ""))
+               ;; Only map image attachments
+               (image-p (string-prefix-p "image/" mime)))
+          (when (and image-p filename id)
+            (let ((cache-path (expand-file-name
+                               filename
+                               (expand-file-name id go-jira-attachment-cache-dir))))
+              (push (cons filename (list :id id :attrs nil :cache-path cache-path))
+                    result)))))
+      (nreverse result))))
+
+(defun go-jira--download-attachments-async (buffer)
+  "Download missing image attachments referenced in BUFFER.
+Scans for [[file:...]] links pointing to the attachment cache,
+checks which files are missing locally, and downloads them
+asynchronously via `jira attach get'.  Always displays already-cached
+images immediately, then refreshes display after new downloads complete."
+  (when (and go-jira-display-images (buffer-live-p buffer))
+    ;; Always display any already-cached images right away
+    (with-current-buffer buffer
+      (org-display-inline-images))
+    ;; Then check for missing images that need downloading
+    (let (to-download)
+      (with-current-buffer buffer
+        (save-excursion
+          (goto-char (point-min))
+          (while (re-search-forward "\\[\\[file:\\([^]]+\\)\\]\\]" nil t)
+            (let ((path (match-string 1)))
+              (when (and (string-prefix-p (expand-file-name go-jira-attachment-cache-dir)
+                                          (expand-file-name path))
+                         (not (file-exists-p path)))
+                ;; Extract attachment ID from the path: .../ATTACHMENT-ID/filename
+                (let ((dir (file-name-directory path)))
+                  (when (string-match "/\\([0-9]+\\)/$" dir)
+                    (push (list :id (match-string 1 dir)
+                                :path path)
+                          to-download))))))))
+      (when to-download
+        (let* ((j (go-jira--find-exe))
+               (pending (length to-download))
+               (try-finish
+                (lambda ()
+                  (setq pending (1- pending))
+                  (when (zerop pending)
+                    ;; All downloads done — refresh inline images
+                    (when (buffer-live-p buffer)
+                      (with-current-buffer buffer
+                        (org-display-inline-images)))))))
+          (dolist (item to-download)
+            (let* ((att-id (plist-get item :id))
+                   (path (plist-get item :path))
+                   (dir (file-name-directory path)))
+              ;; Ensure cache directory exists
+              (make-directory dir t)
+              ;; Download asynchronously
+              (make-process
+               :name (format "jira-attach-%s" att-id)
+               :command (list j "attach" "get" att-id "--output" path)
+               :sentinel (lambda (proc _event)
+                           (when (memq (process-status proc) '(exit signal))
+                             (funcall try-finish)))))))))))
 
 ;;; Public API - Ticket information
 
@@ -283,60 +373,66 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                            (if (string-match "\\(.*\\)/rest/" self-url)
                                (format "%s/browse/%s" (match-string 1 self-url) key)
                              ;; Fallback: fetch via API (single call, not per-comment)
-                             (go-jira-ticket->url key)))))
+                             (go-jira-ticket->url key))))
+               ;; Parse attachment map for image support
+               (attachment-map (go-jira--parse-attachments parsed)))
           (with-current-buffer buf
             (setq-local buffer-read-only nil)
             (erase-buffer)
             (insert (format "* %s: %s\n" key summary))
-            (when description
-              (insert "** Description\n")
-              (insert (go-jira-markup-shift-headings
-                       (go-jira-markup-to-org description) 2))
-              (insert "\n\n"))
-            (unless (s-blank-p subtasks-out)
-              (insert "** Subtasks\n")
-              (insert (string-trim subtasks-out))
-              (insert "\n\n"))
-            (unless (s-blank-p linked-items)
-              (insert "** Linked work items\n")
-              (insert (string-trim linked-items))
-              (insert "\n\n"))
-            (when comments
-              (insert "** Comments\n")
-              (dolist (comment (reverse comments))
-                (let* ((author (gethash 'author comment))
-                       (author-name (when author (gethash 'displayName author)))
-                       (author-id (when author (gethash 'accountId author)))
-                       (created (gethash 'created comment))
-                       (body (gethash 'body comment))
-                       (comment-id (gethash 'id comment)))
-                  (when body
-                    (let* ((timestamp (when created
-                                        (condition-case nil
-                                            (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
-                                          (error created))))
-                           ;; Create comment link if we have the comment ID
-                           (timestamp-link (if (and comment-id base-url)
-                                               (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
-                                                       base-url comment-id comment-id timestamp)
-                                             timestamp))
-                           (heading-start (point)))
-                      (insert (format "*** %s - %s\n"
-                                      (or author-name "Unknown")
-                                      (or timestamp-link timestamp "")))
-                      ;; Store author ID as text property on the heading
-                      (when author-id
-                        (put-text-property heading-start (point) 'jira-comment-author author-id))
-                      ;; Only convert if body has markup
-                      (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
-                          (insert (go-jira-markup-shift-headings
-                                   (go-jira-markup-to-org body) 3))
-                        (insert body))
-                      (insert "\n\n"))))))
+            ;; Bind attachment map for markup conversion (image path rewriting)
+            (let ((go-jira-markup--attachment-map attachment-map))
+              (when description
+                (insert "** Description\n")
+                (insert (go-jira-markup-shift-headings
+                         (go-jira-markup-to-org description) 2))
+                (insert "\n\n"))
+              (unless (s-blank-p subtasks-out)
+                (insert "** Subtasks\n")
+                (insert (string-trim subtasks-out))
+                (insert "\n\n"))
+              (unless (s-blank-p linked-items)
+                (insert "** Linked work items\n")
+                (insert (string-trim linked-items))
+                (insert "\n\n"))
+              (when comments
+                (insert "** Comments\n")
+                (dolist (comment (reverse comments))
+                  (let* ((author (gethash 'author comment))
+                         (author-name (when author (gethash 'displayName author)))
+                         (author-id (when author (gethash 'accountId author)))
+                         (created (gethash 'created comment))
+                         (body (gethash 'body comment))
+                         (comment-id (gethash 'id comment)))
+                    (when body
+                      (let* ((timestamp (when created
+                                          (condition-case nil
+                                              (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
+                                            (error created))))
+                             ;; Create comment link if we have the comment ID
+                             (timestamp-link (if (and comment-id base-url)
+                                                 (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
+                                                         base-url comment-id comment-id timestamp)
+                                               timestamp))
+                             (heading-start (point)))
+                        (insert (format "*** %s - %s\n"
+                                        (or author-name "Unknown")
+                                        (or timestamp-link timestamp "")))
+                        ;; Store author ID as text property on the heading
+                        (when author-id
+                          (put-text-property heading-start (point) 'jira-comment-author author-id))
+                        ;; Only convert if body has markup
+                        (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
+                            (insert (go-jira-markup-shift-headings
+                                     (go-jira-markup-to-org body) 3))
+                          (insert body))
+                        (insert "\n\n")))))))
             (go-jira-view-mode)
             (put 'go-jira--ticket-number 'permanent-local t)
             (setq-local go-jira--ticket-number ticket)
-            (goto-char (point-min)))
+            (goto-char (point-min))
+            ;; Download and display images asynchronously
+            (go-jira--download-attachments-async buf))
           (display-buffer buf)
           (select-window (get-buffer-window buf)))
       (error

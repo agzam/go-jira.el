@@ -365,7 +365,7 @@ STATE is the visibility state after cycling."
 
 (defun go-jira--fetch-issue-details (issue-key)
   "Fetch detailed issue information for ISSUE-KEY as JSON.
-Returns a plist with :description, :comments, etc."
+Returns a plist with :description, :comments, :self-url, :attachment-map."
   (let* ((j (go-jira--find-exe))
          (cmd (format "%s view %s --template json" j issue-key))
          (output (shell-command-to-string cmd)))
@@ -377,9 +377,11 @@ Returns a plist with :description, :comments, etc."
                (fields (gethash 'fields parsed))
                (description (when fields (gethash 'description fields)))
                (comment-data (when fields (gethash 'comment fields)))
-               (comments (when comment-data (gethash 'comments comment-data))))
+               (comments (when comment-data (gethash 'comments comment-data)))
+               (attachment-map (go-jira--parse-attachments parsed)))
           (list :description description
-                :comments comments))
+                :comments comments
+                :attachment-map attachment-map))
       (error
        (message "Warning: Failed to fetch issue details: %s" (error-message-string err))
        nil))))
@@ -461,43 +463,47 @@ SUBTASKS and LINKED-ITEMS are optional strings.  DETAILS is a plist with
           (let ((inhibit-read-only t)
                 (description (plist-get details :description))
                 (comments (plist-get details :comments))
+                (attachment-map (plist-get details :attachment-map))
                 (after-change-functions (remove 'org-fold-core--fix-folded-region after-change-functions)))
 
-            ;; Insert description
-            (when description
-              (insert "\n")
-              (let ((converted (go-jira-markup-to-org description)))
-                (when converted
-                  (insert (go-jira--adjust-heading-levels converted current-level)))
-                (insert "\n")))
+            ;; Bind attachment map for image path rewriting during markup conversion
+            (let ((go-jira-markup--attachment-map attachment-map))
 
-            ;; Insert subtasks
-            (when subtasks
-              (insert (format "%s Subtasks\n" (make-string description-level ?*)))
-              (insert subtasks)
-              (insert "\n\n"))
+              ;; Insert description
+              (when description
+                (insert "\n")
+                (let ((converted (go-jira-markup-to-org description)))
+                  (when converted
+                    (insert (go-jira--adjust-heading-levels converted current-level)))
+                  (insert "\n")))
 
-            ;; Insert linked items
-            (when linked-items
-              (insert (format "%s Linked work items\n" (make-string description-level ?*)))
-              (insert linked-items)
-              (insert "\n\n"))
+              ;; Insert subtasks
+              (when subtasks
+                (insert (format "%s Subtasks\n" (make-string description-level ?*)))
+                (insert subtasks)
+                (insert "\n\n"))
 
-            ;; Insert comments
-            (when comments
-              (insert (format "%s Comments\n" (make-string description-level ?*)))
-              (dolist (comment (reverse comments))
-                (let* ((author (gethash 'author comment))
-                       (author-name (when author (gethash 'displayName author)))
-                       (created (gethash 'created comment))
-                       (body (gethash 'body comment))
-                       (comment-id (gethash 'id comment)))
-                  (when body
-                    (let* ((timestamp (when created
-                                        (condition-case nil
-                                            (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
-                                          (error created))))
-                           (timestamp-link (if (and comment-id base-url)
+              ;; Insert linked items
+              (when linked-items
+                (insert (format "%s Linked work items\n" (make-string description-level ?*)))
+                (insert linked-items)
+                (insert "\n\n"))
+
+              ;; Insert comments
+              (when comments
+                (insert (format "%s Comments\n" (make-string description-level ?*)))
+                (dolist (comment (reverse comments))
+                  (let* ((author (gethash 'author comment))
+                         (author-name (when author (gethash 'displayName author)))
+                         (created (gethash 'created comment))
+                         (body (gethash 'body comment))
+                         (comment-id (gethash 'id comment)))
+                    (when body
+                      (let* ((timestamp (when created
+                                          (condition-case nil
+                                              (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
+                                            (error created))))
+                             (timestamp-link (if (and comment-id base-url)
                                                (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
                                                        base-url comment-id comment-id timestamp)
                                              timestamp)))
@@ -510,11 +516,14 @@ SUBTASKS and LINKED-ITEMS are optional strings.  DETAILS is a plist with
                             (when converted
                               (insert (go-jira--adjust-heading-levels converted comment-author-level))))
                         (insert body))
-                      (insert "\n"))))))
+                      (insert "\n"))))))  ;; close let* timestamp, when body, let* author, dolist, when comments
 
-            (unless (looking-at-p "^\\s-*$")
-              (insert "\n"))))
-        (org-cycle-hide-drawers nil)))))
+              (unless (looking-at-p "^\\s-*$")
+                (insert "\n"))))  ;; close unless, let attachment-map, let inhibit-read-only
+          )  ;; close let* current-level
+        (org-cycle-hide-drawers nil)
+        ;; Download and display images asynchronously
+        (go-jira--download-attachments-async buffer)))))
 
 (defun go-jira--fetch-and-insert-issue-content (issue-key)
   "Fetch and insert content for ISSUE-KEY at current heading (synchronous)."
@@ -564,10 +573,12 @@ in the background, and fills in real content when the response arrives."
                                              (fields (gethash 'fields parsed))
                                              (description (when fields (gethash 'description fields)))
                                              (comment-data (when fields (gethash 'comment fields)))
-                                             (comments (when comment-data (gethash 'comments comment-data))))
+                                             (comments (when comment-data (gethash 'comments comment-data)))
+                                             (attachment-map (go-jira--parse-attachments parsed)))
                                         (list :description description
                                               :comments comments
-                                              :self-url self-url))
+                                              :self-url self-url
+                                              :attachment-map attachment-map))
                                     (error nil)))
                          (subtasks (let ((s (string-trim
                                             (ansi-color-apply
