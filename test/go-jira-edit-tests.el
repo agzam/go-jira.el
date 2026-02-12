@@ -255,66 +255,78 @@ Done issue description.
 
 (describe "go-jira-edit--create-overlay"
   (describe "in view mode"
-    (it "creates overlay at buffer start"
+    (it "creates edit session with header line"
       (with-current-buffer (go-jira-edit-test--setup-view-buffer)
         (let ((original-content (buffer-string))
               (ctx (go-jira-edit--get-ticket-context)))
           (go-jira-edit--create-overlay ctx)
-          
+
           ;; Check overlay exists
           (expect go-jira-edit--active-overlay :to-be-truthy)
           (expect (overlay-get go-jira-edit--active-overlay 'go-jira-ticket)
                   :to-equal "SAC-123")
-          
-          ;; Check instructions were inserted
-          (expect (buffer-string) :to-match "Edit Issue")
-          (expect (buffer-string) :to-match "C-c C-c submit")
-          
+
+          ;; Header line should be set with instructions
+          (expect header-line-format :to-be-truthy)
+          ;; Verify the header-line-format list contains our propertized strings
+          (let ((header-text (mapconcat
+                              (lambda (s) (substring-no-properties s))
+                              header-line-format "")))
+            (expect header-text :to-match "Edit Issue")
+            (expect header-text :to-match "C-c C-c"))
+
+          ;; Buffer content should NOT be modified (no inserted text)
+          (expect (buffer-string) :to-equal original-content)
+
           ;; Clean up
           (go-jira-edit--remove-overlay))
         (kill-buffer))))
-  
+
   (describe "in board mode"
-    (it "creates overlay and narrows to ticket"
+    (it "creates edit session and narrows to ticket"
       (with-current-buffer (go-jira-edit-test--setup-board-buffer)
         (goto-char (point-min))
         (re-search-forward "^\\*\\* SAC-123")
         (let ((ctx (go-jira-edit--get-ticket-context)))
           (go-jira-edit--create-overlay ctx)
-          
+
           ;; Check narrowed
           (expect (buffer-narrowed-p) :to-be-truthy)
-          
+
           ;; Check overlay exists
           (expect go-jira-edit--active-overlay :to-be-truthy)
-          
-          ;; Check only SAC-123 is visible
+
+          ;; Header line should be set
+          (let ((header-text (mapconcat
+                              (lambda (s) (substring-no-properties s))
+                              header-line-format "")))
+            (expect header-text :to-match "Edit Issue"))
+
+          ;; First line should be the ticket heading, not an instruction line
           (goto-char (point-min))
           (expect (buffer-substring (point) (line-end-position))
-                  :to-match "Edit Issue")
-          
+                  :to-match "SAC-123")
+
           ;; Clean up
           (go-jira-edit--remove-overlay)
           (widen))
         (kill-buffer)))))
 
-;;; Tests: Extraction with active overlay (the critical bug scenario)
+;;; Tests: Extraction with active edit session
 
-(describe "go-jira-edit--extract-title with active overlay"
+(describe "go-jira-edit--extract-title with active edit session"
   (describe "in view mode"
-    (it "extracts title correctly while edit overlay is active"
+    (it "extracts title correctly while edit session is active"
       (with-current-buffer (go-jira-edit-test--setup-view-buffer)
         (let ((ctx (go-jira-edit--get-ticket-context)))
           (go-jira-edit--create-overlay ctx)
-          ;; The overlay instruction line is now at point-min, before the heading.
-          ;; extract-title must still find the heading past the overlay.
           (let ((title (go-jira-edit--extract-title)))
             (expect title :to-equal "Test Issue Title"))
           (go-jira-edit--remove-overlay))
         (kill-buffer))))
 
   (describe "in board mode"
-    (it "extracts title correctly while edit overlay is active"
+    (it "extracts title correctly while edit session is active"
       (with-current-buffer (go-jira-edit-test--setup-board-buffer)
         (goto-char (point-min))
         (re-search-forward "^\\*\\* SAC-123")
@@ -326,9 +338,9 @@ Done issue description.
           (widen))
         (kill-buffer)))))
 
-(describe "go-jira-edit--extract-description with active overlay"
+(describe "go-jira-edit--extract-description with active edit session"
   (describe "in view mode"
-    (it "extracts description correctly while edit overlay is active"
+    (it "extracts description correctly while edit session is active"
       (with-current-buffer (go-jira-edit-test--setup-view-buffer)
         (let ((ctx (go-jira-edit--get-ticket-context)))
           (go-jira-edit--create-overlay ctx)
@@ -338,9 +350,9 @@ Done issue description.
           (go-jira-edit--remove-overlay))
         (kill-buffer)))))
 
-(describe "go-jira-edit--extract-comments with active overlay"
+(describe "go-jira-edit--extract-comments with active edit session"
   (describe "in view mode"
-    (it "extracts comments correctly while edit overlay is active"
+    (it "extracts comments correctly while edit session is active"
       (with-current-buffer (go-jira-edit-test--setup-view-buffer)
         (let ((ctx (go-jira-edit--get-ticket-context)))
           (go-jira-edit--create-overlay ctx)

@@ -13,14 +13,16 @@
 
 ;;; Commentary:
 
-;; Provides a universal overlay-based UI for editing Jira issues.
-;; Uses JSON templates and custom editor scripts to submit changes.
+;; Provides editing UI for Jira issues using `header-line-format'
+;; for always-visible edit controls, plus JSON templates and custom
+;; editor scripts to submit changes.
 ;;
 ;; Features:
-;; - Edit title and description with overlay UI
+;; - Edit title, description, and comments
+;; - Persistent header-line indicator visible at any scroll position
 ;; - Org-mode markup support (converted to Jira markup on submit)
 ;; - Universal JSON-based submission flow
-;; - Works in go-jira-view-mode
+;; - Works in go-jira-view-mode and go-jira-board-view-mode
 
 ;;; Code:
 
@@ -41,10 +43,15 @@
   :type 'boolean
   :group 'go-jira-edit)
 
-;;; Description overlay management
+;;; Edit session management
 
 (defvar-local go-jira-edit--active-overlay nil
-  "The currently active description edit overlay in this buffer.")
+  "Non-nil when an edit session is active in this buffer.
+Stores the overlay object for backward compatibility, but the visible
+indicator is now shown via `header-line-format'.")
+
+(defvar-local go-jira-edit--saved-header-line nil
+  "Saved `header-line-format' to restore when edit mode is deactivated.")
 
 (defvar go-jira-edit-mode-map
   (let ((map (make-sparse-keymap)))
@@ -63,28 +70,15 @@ Inherits from org-mode-map, overrides submit and abort.")
   :keymap go-jira-edit-mode-map)
 
 (defun go-jira-edit--ticket-heading-start (&optional start)
-  "Find the actual ticket heading position, skipping the edit overlay.
+  "Find the actual ticket heading position.
 START is the beginning of the region to search (default `point-min').
-When the edit overlay is active, its instruction line sits before the
-heading, so `point-min' or `:start' from context no longer points at
-the heading.  This function skips past the overlay to find the first
-Org heading."
+Moves to the first Org heading at or after START."
   (save-excursion
     (goto-char (or start (point-min)))
-    (if (and go-jira-edit--active-overlay
-             (overlay-buffer go-jira-edit--active-overlay))
-        (let ((ov-end (overlay-end go-jira-edit--active-overlay)))
-          (goto-char (max (or start (point-min)) ov-end))
-          ;; Find next heading if not already on one
-          (unless (org-at-heading-p)
-            (re-search-forward "^\\*+ " nil t)
-            (goto-char (line-beginning-position)))
-          (point))
-      ;; No overlay - use start as-is, but ensure we're on a heading
-      (unless (org-at-heading-p)
-        (re-search-forward "^\\*+ " nil t)
-        (goto-char (line-beginning-position)))
-      (point))))
+    (unless (org-at-heading-p)
+      (re-search-forward "^\\*+ " nil t)
+      (goto-char (line-beginning-position)))
+    (point)))
 
 (defun go-jira-edit--extract-title (&optional context)
   "Extract the ticket title.
@@ -128,10 +122,11 @@ CONTEXT is a plist with ticket bounds.  If nil, uses current context."
           "")))))
 
 (defun go-jira-edit--create-overlay (context)
-  "Create an edit overlay for the ticket specified by CONTEXT.
+  "Start an edit session for the ticket specified by CONTEXT.
 CONTEXT is a plist with :key, :start, :end from
-go-jira-edit--get-ticket-context.  The overlay appears at the top of the
-ticket with submit/abort controls."
+`go-jira-edit--get-ticket-context'.  Shows a persistent header line
+with submit/abort controls that remains visible regardless of scroll
+position."
   (when go-jira-edit--active-overlay
     (user-error "Already editing"))
 
@@ -140,9 +135,8 @@ ticket with submit/abort controls."
     (unless ticket-key
       (user-error "Could not determine ticket key"))
 
-    ;; Handle narrowing for board mode FIRST, before inserting overlay
+    ;; Handle narrowing for board mode FIRST
     (when (derived-mode-p 'go-jira-board-view-mode)
-      ;; (widen)  ; First widen in case already narrowed
       (goto-char ticket-start)
       (org-narrow-to-subtree)
       ;; CRITICAL: Disable org-element caching entirely in narrowed buffer
@@ -151,34 +145,25 @@ ticket with submit/abort controls."
       (when (fboundp 'org-element-cache-reset)
         (org-element-cache-reset)))
 
-    ;; Create overlay at the top of the ticket, before the ticket heading
-    ;; In board mode (narrowed), this is at point-min
-    ;; In view mode (not narrowed), this is at ticket-start
-    (save-excursion
-      (goto-char (point-min))
+    ;; Create a zero-width overlay to serve as the edit session token.
+    ;; It stores ticket metadata and original values but doesn't modify
+    ;; buffer content.  The visible indicator is the header line.
+    (let ((ov (make-overlay (point-min) (point-min) nil nil t)))
+      (overlay-put ov 'go-jira-edit-edit t)
+      (overlay-put ov 'go-jira-ticket ticket-key)
+      (setq go-jira-edit--active-overlay ov))
 
-      (let* ((overlay-start (point))
-             (inhibit-read-only t)
-             (instructions
-              (concat
-               (propertize "Edit Issue" 'face '(:weight bold :inherit font-lock-function-name-face))
-               (propertize " │ " 'face 'shadow)
-               (propertize "C-c C-c" 'face 'success)
-               (propertize " submit" 'face 'shadow)
-               (propertize " │ " 'face 'shadow)
-               (propertize "C-c C-k" 'face 'error)
-               (propertize " abort" 'face 'shadow)
-               "\n")))
-
-        (insert instructions)
-        (let ((ov (make-overlay overlay-start (point) nil nil t)))
-          (overlay-put ov 'go-jira-edit-edit t)
-          (overlay-put ov 'go-jira-ticket ticket-key)
-          (overlay-put ov 'priority 1000)
-          (overlay-put ov 'evaporate t)
-          (overlay-put ov 'face '(:box (:line-width 1 :style released-button)))
-
-          (setq go-jira-edit--active-overlay ov))))
+    ;; Show persistent header line with edit instructions
+    (setq go-jira-edit--saved-header-line header-line-format)
+    (setq header-line-format
+          (list
+           (propertize " Edit Issue " 'face '(:weight bold :inherit font-lock-function-name-face))
+           (propertize " │ " 'face 'shadow)
+           (propertize "C-c C-c" 'face '(:weight bold :inherit success))
+           (propertize " submit " 'face 'shadow)
+           (propertize "│ " 'face 'shadow)
+           (propertize "C-c C-k" 'face '(:weight bold :inherit error))
+           (propertize " abort" 'face 'shadow)))
 
     ;; Store original values for change detection AFTER narrowing
     ;; Clear org-element cache again to ensure no stale positions
@@ -218,25 +203,21 @@ Returns non-nil if the buffer has been modified since edit started."
   (buffer-modified-p))
 
 (defun go-jira-edit--remove-overlay ()
-  "Remove the active edit overlay and restore read-only mode."
+  "Remove the active edit session and restore read-only mode."
   (when go-jira-edit--active-overlay
-    ;; Widen if we're in board mode (was narrowed)
-    ;; (when (derived-mode-p 'go-jira-board-view-mode)
-    ;;   (widen))
+    ;; Remove the zero-width overlay
+    (delete-overlay go-jira-edit--active-overlay)
+    (setq go-jira-edit--active-overlay nil)
 
-    ;; Remove the instruction overlay
-    (let ((inhibit-read-only t))
-      (when (overlay-buffer go-jira-edit--active-overlay)
-        (delete-region (overlay-start go-jira-edit--active-overlay)
-                       (overlay-end go-jira-edit--active-overlay)))
-      (delete-overlay go-jira-edit--active-overlay)
-      (setq go-jira-edit--active-overlay nil)
+    ;; Restore header line
+    (setq header-line-format go-jira-edit--saved-header-line)
+    (setq go-jira-edit--saved-header-line nil)
 
-      ;; Disable edit mode
-      (go-jira-edit-mode -1)
+    ;; Disable edit mode
+    (go-jira-edit-mode -1)
 
-      ;; Restore buffer read-only state
-      (setq buffer-read-only t))))
+    ;; Restore buffer read-only state
+    (setq buffer-read-only t)))
 
 ;;; Ticket context detection (works in both view and board modes)
 
