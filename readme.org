@@ -23,7 +23,7 @@ You can still grab it directly from GitHub, here's the example Doom config:
 ** Prerequisites
 1. Obviously, you need go-jira CLI installed, follow [[https://github.com/go-jira/jira][the instructions]]
 
-2. You need pandoc installed and within the `$PATH`.
+2. You need [[https://pandoc.org/][Pandoc]] installed and within the ~$PATH~.
    
    /I tried really hard to build native elisp jira->org->jira conversion, yet it still became a whack-a-mole game wasting too much of my time/
 
@@ -31,8 +31,9 @@ You can still grab it directly from GitHub, here's the example Doom config:
 It depends on the type of Jira instance you're trying to access. The package doesn't do anything here, so you *must* sort that out with the CLI first - make sure ~jira view <SOME-TICKET-NUMBER>~ in terminal works, before trying any go-jira Emacs commands.
 
 * Features:
+*** ~go-jira-view-ticket~
 
-** ~go-jira-view-ticket~ - Main buffer for ticket overview. Shows the ticket description, subtasks, linked items and comments. You can edit title, description, your comments and add new ones.
+Main buffer for ticket overview. Shows the ticket description, subtasks, linked items and comments. You can edit title, description, your comments and add new ones.
 
 | Key     | Command                        | Description                         |
 |---------+--------------------------------+-------------------------------------|
@@ -42,7 +43,9 @@ It depends on the type of Jira instance you're trying to access. The package doe
 | C-c M-r | go-jira-view-mode-refresh      | Pull ticket data from Jira          |
 | C-c M-q | kill-buffer-and-window         |                                     |
 
-** ~go-jira-display-board~ - Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline with titles, upon expanding it will load individual ticket info. Editing works the same way as in view-ticket buffer.
+*** ~go-jira-display-board~
+
+Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline with titles, upon expanding it will load individual ticket info. Editing works the same way as in view-ticket buffer.
   
 | Key     | Command                           | Description                                                |
 |---------+-----------------------------------+------------------------------------------------------------|
@@ -56,21 +59,28 @@ It depends on the type of Jira instance you're trying to access. The package doe
 | C-c M-q | quit-window                       |                                                            |
   
 
-** ~go-jira-browse-default-board~ - most of the time you'd want to quickly jump to one specific board. When you run the command for the first time, it would prompt you to pick a board from the list and sets the ~go-jira-default-board-id~. You can set it manually:
+*** ~go-jira-browse-default-board~
+
+Most of the time you'd want to quickly jump to one specific board. When you run the command for the first time, it would prompt you to pick a board from the list and sets the ~go-jira-default-board-id~. You can set it manually:
 
 1. Open your board: =M-x go-jira-browse-boards= → select “SAC Pipeline (Pod 2)”
 2. In that buffer, evaluate: =M-: go-jira--board-data RET=
 3. Look for =:id 3018= (or whatever number) in the output
 
-** ~go-jira-search~ - Consult interface for searching - takes a JQL and sends the request. Typically, you'd want not a global but only narrowed search within specific projects, assignees, ticket conditions, etc. You can set ~go-jira-default-search-format-string~ and it will be used as the default template, e.g.,
+*** ~go-jira-search~ 
+
+Consult interface for searching - takes a JQL and sends the request. Typically, you'd want not a global but only narrowed search within specific projects, assignees, ticket conditions, etc. You can set ~go-jira-default-search-format-string~ and it will be used as the default template, e.g.,
 
 #+begin_src emacs-lisp
 (setopt go-jira-default-search-format-string
         "project = PROJ1 AND status NOT IN (Closed, Done) AND text ~ \"%s\"")
 #+end_src  
   
-** ~go-jira-popup-mode~ - shows description of a ticket when cursor is at point of a text matching Jira ticket number
+*** ~go-jira-popup-mode~ 
+
+Shows description of a ticket when cursor is at point of a text matching Jira ticket number
 
 - in TUI, instead of the popup there's an option - ~go-jira-eldoc-mode~
 
-** Embark integration - adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.
+*** Embark integration 
+Adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.

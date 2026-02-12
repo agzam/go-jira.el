@@ -419,7 +419,7 @@ are left untouched.  Uses `org-element' to identify real headings."
            (headings '()))
       (org-element-map tree 'headline
         (lambda (hl)
-          (push (list (org-element-begin hl)
+          (push (list (org-element-property :begin hl)
                       (org-element-property :level hl))
                 headings)))
       ;; headings is already deepest-last due to push; process in order
