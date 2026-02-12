@@ -51,6 +51,14 @@ Returns the placeholder string."
 
 ;;; Block-level conversions
 
+(defun go-jira-markup--escape-block-content (content)
+  "Escape CONTENT for inclusion in Org-mode source/example blocks.
+Lines starting with `*' or `#+' are prefixed with `,' to prevent
+Org from interpreting them as headings or keywords."
+  (save-match-data
+    (replace-regexp-in-string
+     "^\\([*]\\|#\\+\\)" ",\\1" content)))
+
 (defun go-jira-markup--convert-code-blocks (text)
   "Convert Jira code blocks of TEXT to Org-mode source blocks and protect them.
 Handles {code:lang}...{code} and {noformat}...{noformat}.
@@ -67,7 +75,8 @@ Also strips surrounding {quote} blocks if they wrap code blocks."
               "{code:\\([^}]+\\)}\\(\\(?:.\\|\n\\)*?\\){code}"
               (lambda (match)
                 (let* ((lang (match-string 1 match))
-                       (content (match-string 2 match))
+                       (content (go-jira-markup--escape-block-content
+                                 (match-string 2 match)))
                        (org-block (format "\n#+begin_src %s\n%s\n#+end_src\n" lang content)))
                   (go-jira-markup--protect-block org-block)))
               text))
@@ -76,7 +85,8 @@ Also strips surrounding {quote} blocks if they wrap code blocks."
   (setq text (replace-regexp-in-string
               "{code}\\(\\(?:.\\|\n\\)*?\\){code}"
               (lambda (match)
-                (let* ((content (match-string 1 match))
+                (let* ((content (go-jira-markup--escape-block-content
+                                 (match-string 1 match)))
                        (org-block (format "\n#+begin_src\n%s\n#+end_src\n" content)))
                   (go-jira-markup--protect-block org-block)))
               text))
@@ -85,7 +95,8 @@ Also strips surrounding {quote} blocks if they wrap code blocks."
   (setq text (replace-regexp-in-string
               "{noformat}\\(\\(?:.\\|\n\\)*?\\){noformat}"
               (lambda (match)
-                (let* ((content (match-string 1 match))
+                (let* ((content (go-jira-markup--escape-block-content
+                                 (match-string 1 match)))
                        (org-block (format "\n#+begin_example\n%s\n#+end_example\n" content)))
                   (go-jira-markup--protect-block org-block)))
               text))
@@ -478,36 +489,53 @@ Returns the placeholder string."
                 text t t)))
   text)
 
+(defun go-jira-markup--unescape-block-content (content)
+  "Unescape CONTENT from an Org-mode source/example block.
+Removes the leading `,' that Org uses to escape `*' and `#+'
+at the start of lines inside blocks."
+  (save-match-data
+    (replace-regexp-in-string
+     "^,\\([*]\\|#\\+\\)" "\\1" content)))
+
 (defun go-jira-markup--org-convert-code-blocks (text)
   "Convert Org-mode source blocks of TEXT to Jira code blocks and protect them.
 Handles #+begin_src lang ... #+end_src and #+begin_example ... #+end_example."
   ;; Source blocks with language
   ;; Note: Using \\` and \\' or \\(?:^\\|\\`\\) for multiline matching
+  ;; IMPORTANT: save-match-data is needed because string-trim and
+  ;; unescape-block-content call replace-regexp-in-string which clobbers
+  ;; the match data that the outer replace-regexp-in-string relies on.
   (setq text (replace-regexp-in-string
               "\\(?:^\\|\\`\\)[ \t]*#\\+begin_src[ \t]+\\([^\n]+\\)\n\\(\\(?:.\\|\n\\)*?\\)\n[ \t]*#\\+end_src[ \t]*\\(?:$\\|\\'\\|\n\\)"
               (lambda (match)
-                (let* ((lang (string-trim (match-string 1 match)))
-                       (content (string-trim (match-string 2 match)))
-                       (jira-block (format "{code:%s}\n%s\n{code}" lang content)))
-                  (go-jira-markup--org-protect-block jira-block)))
+                (save-match-data
+                  (let* ((lang (string-trim (match-string 1 match)))
+                         (content (go-jira-markup--unescape-block-content
+                                   (string-trim (match-string 2 match))))
+                         (jira-block (format "{code:%s}\n%s\n{code}" lang content)))
+                    (go-jira-markup--org-protect-block jira-block))))
               text))
 
   ;; Source blocks without language
   (setq text (replace-regexp-in-string
               "\\(?:^\\|\\`\\)[ \t]*#\\+begin_src[ \t]*\n\\(\\(?:.\\|\n\\)*?\\)\n[ \t]*#\\+end_src[ \t]*\\(?:$\\|\\'\\|\n\\)"
               (lambda (match)
-                (let* ((content (string-trim (match-string 1 match)))
-                       (jira-block (format "{code}\n%s\n{code}" content)))
-                  (go-jira-markup--org-protect-block jira-block)))
+                (save-match-data
+                  (let* ((content (go-jira-markup--unescape-block-content
+                                   (string-trim (match-string 1 match))))
+                         (jira-block (format "{code}\n%s\n{code}" content)))
+                    (go-jira-markup--org-protect-block jira-block))))
               text))
 
   ;; Example blocks
   (setq text (replace-regexp-in-string
               "\\(?:^\\|\\`\\)[ \t]*#\\+begin_example[ \t]*\n\\(\\(?:.\\|\n\\)*?\\)\n[ \t]*#\\+end_example[ \t]*\\(?:$\\|\\'\\|\n\\)"
               (lambda (match)
-                (let* ((content (string-trim (match-string 1 match)))
-                       (jira-block (format "{noformat}\n%s\n{noformat}" content)))
-                  (go-jira-markup--org-protect-block jira-block)))
+                (save-match-data
+                  (let* ((content (go-jira-markup--unescape-block-content
+                                   (string-trim (match-string 1 match))))
+                         (jira-block (format "{noformat}\n%s\n{noformat}" content)))
+                    (go-jira-markup--org-protect-block jira-block))))
               text))
 
   text)

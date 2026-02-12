@@ -199,7 +199,25 @@
     (let ((text "* Heading\n*bold text*\n** Subheading\n")
           (base-level 1))
       (expect (go-jira--adjust-heading-levels text base-level)
-              :to-equal "** Heading\n*bold text*\n*** Subheading\n"))))
+              :to-equal "** Heading\n*bold text*\n*** Subheading\n")))
+
+  (it "doesn't modify escaped asterisks inside example blocks"
+    (let ((text "#+begin_example\n,* could use incrementalLoadError state\n,* another line\n#+end_example\n")
+          (base-level 2))
+      (expect (go-jira--adjust-heading-levels text base-level)
+              :to-equal "#+begin_example\n,* could use incrementalLoadError state\n,* another line\n#+end_example\n")))
+
+  (it "doesn't modify content inside src blocks"
+    (let ((text "#+begin_src python\n,* item1\nprint('hello')\n#+end_src\n")
+          (base-level 2))
+      (expect (go-jira--adjust-heading-levels text base-level)
+              :to-equal "#+begin_src python\n,* item1\nprint('hello')\n#+end_src\n")))
+
+  (it "adjusts headings but preserves example block content"
+    (let ((text "* Real Heading\n#+begin_example\n,* not a heading\n#+end_example\n** Another Heading\n")
+          (base-level 2))
+      (expect (go-jira--adjust-heading-levels text base-level)
+              :to-equal "*** Real Heading\n#+begin_example\n,* not a heading\n#+end_example\n**** Another Heading\n"))))
 
 (describe "Board data integration"
   (it "board data contains all required fields"

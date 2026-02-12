@@ -257,5 +257,97 @@ some code
           (expect result :to-match "\\`\n?#\\+begin_example\n")
           (expect result :to-match "\n#\\+end_example"))))))
 
+(describe "block content escaping (SAC-30170)"
+
+  (it "escapes asterisk lines in noformat blocks"
+    (let ((input "{noformat}\n* could use incrementalLoadError state\n* another line\n{noformat}"))
+      (let ((result (go-jira-markup-to-org input)))
+        (expect result :to-match "#\\+begin_example")
+        ;; Asterisks should be escaped with comma
+        (expect result :to-match ",\\* could use incrementalLoadError state")
+        (expect result :to-match ",\\* another line")
+        (expect result :to-match "#\\+end_example"))))
+
+  (it "escapes asterisk lines in code blocks"
+    (let ((input "{code:python}\n* item1\n** item2\n{code}"))
+      (let ((result (go-jira-markup-to-org input)))
+        (expect result :to-match ",\\* item1")
+        (expect result :to-match ",\\*\\* item2"))))
+
+  (it "escapes #+ lines in noformat blocks"
+    (let ((input "{noformat}\n#+begin_src python\nfoo\n#+end_src\n{noformat}"))
+      (let ((result (go-jira-markup-to-org input)))
+        (expect result :to-match "#\\+begin_example")
+        (expect result :to-match ",#\\+begin_src python")
+        (expect result :to-match ",#\\+end_src")
+        (expect result :to-match "#\\+end_example"))))
+
+  (it "does not escape lines that don't start with * or #+"
+    (let ((input "{noformat}\nplain text\n  * indented asterisk\n{noformat}"))
+      (let ((result (go-jira-markup-to-org input)))
+        (expect result :to-match "plain text")
+        ;; Indented asterisk is NOT escaped (only line-initial ones)
+        (expect result :to-match "  \\* indented asterisk")
+        (expect result :not :to-match ",plain")))))
+
+(describe "go-jira-markup round-trip (jira → org → jira)"
+
+  (it "round-trips noformat blocks with asterisk lines"
+    (let* ((input "{noformat}\n* could use incrementalLoadError state\n* another line\n{noformat}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal (string-trim input))))
+
+  (it "round-trips code blocks with asterisk lines"
+    (let* ((input "{code:python}\n* item1\n* item2\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal (string-trim input))))
+
+  (it "round-trips noformat blocks with #+ lines"
+    (let* ((input "{noformat}\n#+begin_src python\nfoo\n#+end_src\n{noformat}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal (string-trim input))))
+
+  (it "round-trips simple code blocks"
+    (let* ((input "{code:java}\npublic class Test {}\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal (string-trim input))))
+
+  (it "round-trips bold text"
+    (let* ((input "Some *bold* text")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal input)))
+
+  (it "round-trips numbered lists"
+    (let* ((input "# Item 1\n# Item 2\n# Item 3")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal input)))
+
+  ;; NOTE: Mixed list types (#* = bullet nested under number) don't fully
+  ;; round-trip because org-mode represents both "#*" and "**" as indented
+  ;; bullets.  This is a known limitation of the current conversion.
+  (xit "round-trips numbered lists with nested bullets"
+    (let* ((input "# Item 1\n#* Sub-item A\n#* Sub-item B\n# Item 2")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal input)))
+
+  (it "round-trips code blocks without language"
+    (let* ((input "{code}\nsome code\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal (string-trim input))))
+
+  (it "round-trips plain text unchanged"
+    (let* ((input "Just plain text with no markup")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-equal input))))
+
 (provide 'go-jira-markup-tests)
 ;;; go-jira-markup-tests.el ends here

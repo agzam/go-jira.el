@@ -442,14 +442,27 @@ Returns the output as a string, or nil if empty."
 
 (defun go-jira--adjust-heading-levels (text base-level)
   "Adjust `org-mode' heading levels in TEXT to be relative to BASE-LEVEL.
-Any line starting with one or more asterisks followed by a space
-will have BASE-LEVEL asterisks added to it."
+Only actual Org headings are adjusted; lines inside source/example blocks
+are left untouched.  Uses `org-element' to identify real headings."
   (with-temp-buffer
     (insert text)
-    (goto-char (point-min))
-    (let ((stars (make-string base-level ?*)))
-      (while (re-search-forward "^\\(\\*+\\) " nil t)
-        (replace-match (concat stars "\\1 "))))
+    (delay-mode-hooks (org-mode))
+    (let* ((tree (org-element-parse-buffer))
+           ;; Collect heading positions from deepest to shallowest so
+           ;; earlier edits don't shift later positions.
+           (headings '()))
+      (org-element-map tree 'headline
+        (lambda (hl)
+          (push (list (org-element-begin hl)
+                      (org-element-property :level hl))
+                headings)))
+      ;; headings is already deepest-last due to push; process in order
+      (dolist (h headings)
+        (let ((pos (nth 0 h))
+              (level (nth 1 h)))
+          (goto-char pos)
+          (when (looking-at "\\(\\*+\\) ")
+            (replace-match (concat (make-string (+ level base-level) ?*) " "))))))
     (buffer-string)))
 
 (defun go-jira--fetch-and-insert-issue-content (issue-key)
