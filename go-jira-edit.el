@@ -32,6 +32,7 @@
 
 (declare-function go-jira--find-exe "go-jira")
 (declare-function go-jira-view-mode-refresh "go-jira")
+(declare-function go-jira-board-refresh "go-jira-board")
 
 (defgroup go-jira-edit nil
   "Universal editing functionality for go-jira."
@@ -219,7 +220,11 @@ Returns non-nil if the buffer has been modified since edit started."
     (go-jira-edit-mode -1)
 
     ;; Restore buffer read-only state
-    (setq buffer-read-only t)))
+    (setq buffer-read-only t)
+
+    ;; Widen if narrowed (board mode narrows to ticket subtree)
+    (when (buffer-narrowed-p)
+      (widen))))
 
 ;;; Ticket context detection (works in both view and board modes)
 
@@ -502,14 +507,9 @@ Creates an overlay with submit/abort controls."
             (go-jira-edit--remove-overlay)
 
             (if success
-                (progn
-                  (if go-jira-debug
-                      (message "Updated successfully (%d API calls)" request-count)
-                    (message "Updated successfully"))
-                  ;; Refresh the view
-                  (with-current-buffer buffer
-                    (when (derived-mode-p 'go-jira-view-mode)
-                      (go-jira-view-mode-refresh))))
+                (if go-jira-debug
+                    (message "Updated successfully (%d API calls)" request-count)
+                  (message "Updated successfully"))
               (user-error "Failed to update.  Check *Messages* for details"))))
 
       ;; Cleanup temp files
@@ -530,9 +530,12 @@ Creates an overlay with submit/abort controls."
       (when (yes-or-no-p "Abort edit without submitting? ")
         (go-jira-edit--remove-overlay)
         (message "Edit aborted")
-        ;; Refresh to restore original content
-        (when (derived-mode-p 'go-jira-view-mode)
-          (go-jira-view-mode-refresh)))
+        ;; Refresh to restore original content (discard user's edits)
+        (cond
+         ((derived-mode-p 'go-jira-view-mode)
+          (go-jira-view-mode-refresh))
+         ((derived-mode-p 'go-jira-board-view-mode)
+          (go-jira-board-refresh))))
     ;; No changes - quietly abort
     (go-jira-edit--remove-overlay)))
 
