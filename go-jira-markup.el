@@ -25,10 +25,10 @@
 ;; citation, color markup, language-less code blocks).  These are handled
 ;; via pre/post-processing around the Pandoc call.
 ;;
-;; Jira content headings (h1. through h6.) are converted to plain text
-;; with `jira-heading' text properties rather than Org headings, because
-;; the converted content lives inside an Org subtree (e.g., under
-;; "** Description").
+;; Jira content headings (h1. through h6.) become real Org headings
+;; (* through ******).  The caller is responsible for adjusting heading
+;; levels to fit the surrounding Org tree (e.g., shifting by +2 when
+;; inserting under "** Description").  See `go-jira-markup-shift-headings'.
 
 ;;; Code:
 
@@ -236,38 +236,22 @@ Protects elements that Pandoc's Org→Jira writer handles incorrectly:
 
   text)
 
-;;; Heading conversion (text properties ↔ org headings)
+;;; Heading level adjustment
 
-(defun go-jira-markup--org-headings-to-text-properties (text)
-  "Convert Org headings in TEXT to plain text with `jira-heading' properties.
-Pandoc outputs real Org headings (* heading, ** heading, etc.) but
-the converted content lives inside an Org subtree, so we convert
-them to propertized plain text that `go-jira--fontify-jira-headings'
-can render with appropriate faces."
-  (let ((lines (split-string text "\n"))
-        (result '()))
-    (dolist (line lines)
-      (if (string-match "^\\(\\*+\\) \\(.*\\)" line)
-          (let* ((level (length (match-string 1 line)))
-                 (content (match-string 2 line)))
-            (push (propertize content
-                              'jira-heading level
-                              'font-lock-multiline t)
-                  result))
-        (push line result)))
-    (mapconcat #'identity (nreverse result) "\n")))
-
-(defun go-jira-markup--text-properties-to-org-headings (text)
-  "Convert `jira-heading' text properties in TEXT back to Org headings.
-This is the reverse of `go-jira-markup--org-headings-to-text-properties',
-preparing text for Pandoc's Org reader."
-  (let ((lines (split-string text "\n"))
-        (result '()))
-    (dolist (line lines)
-      (if-let ((level (get-text-property 0 'jira-heading line)))
-          (push (format "%s %s" (make-string level ?*) line) result)
-        (push line result)))
-    (mapconcat #'identity (nreverse result) "\n")))
+(defun go-jira-markup-shift-headings (text offset)
+  "Shift Org heading levels in TEXT by OFFSET.
+Positive OFFSET increases levels (e.g., `*' → `***' with offset 2).
+Negative OFFSET decreases levels (clamped to minimum 1).
+Only modifies lines that start with `*+ ' (Org heading syntax)."
+  (if (zerop offset)
+      text
+    (replace-regexp-in-string
+     (rx line-start (group (+ "*")) " ")
+     (lambda (match)
+       (let* ((stars (match-string 1 match))
+              (new-level (max 1 (+ (length stars) offset))))
+         (concat (make-string new-level ?*) " ")))
+     text)))
 
 ;;; Public API
 
@@ -275,8 +259,9 @@ preparing text for Pandoc's Org reader."
 (defun go-jira-markup-to-org (jira-text)
   "Convert JIRA-TEXT (Jira wiki markup) to Org-mode format.
 Uses Pandoc for the heavy lifting, with pre/post-processing for
-elements Pandoc doesn't handle well.  Headings are converted to
-`jira-heading' text properties instead of real Org headings.
+elements Pandoc doesn't handle well.  Jira content headings (h1.
+through h6.) become real Org headings; the caller is responsible for
+adjusting levels to fit the surrounding Org tree structure.
 Returns the converted text as a string."
   (when (and jira-text (not (string-empty-p jira-text)))
     (let* (;; Pre-process: protect pandoc-lossy elements
@@ -285,8 +270,6 @@ Returns the converted text as a string."
            (text (go-jira-markup--pandoc-convert text "jira" "org"))
            ;; Post-process: restore placeholders, fix _nolang_
            (text (go-jira-markup--jira-post-process-org text))
-           ;; Convert org headings to text properties
-           (text (go-jira-markup--org-headings-to-text-properties text))
            ;; Trim trailing whitespace
            (text (string-trim-right text)))
       text)))
@@ -295,14 +278,14 @@ Returns the converted text as a string."
 (defun go-jira-markup-from-org (org-text)
   "Convert ORG-TEXT (Org-mode markup) to Jira wiki markup format.
 Uses Pandoc for the heavy lifting, with pre/post-processing for
-elements Pandoc doesn't handle well.  `jira-heading' text properties
-are converted back to Org headings before Pandoc processes the text.
+elements Pandoc doesn't handle well.  Org headings in ORG-TEXT are
+converted to Jira headings (h1. through h6.); the caller should
+normalize levels before calling if the text was extracted from a
+nested Org subtree.
 Returns the converted text as a string."
   (when (and org-text (not (string-empty-p org-text)))
-    (let* (;; Convert jira-heading properties to real org headings
-           (text (go-jira-markup--text-properties-to-org-headings org-text))
-           ;; Pre-process: protect pandoc-lossy org elements
-           (text (go-jira-markup--org-pre-process text))
+    (let* (;; Pre-process: protect pandoc-lossy org elements
+           (text (go-jira-markup--org-pre-process org-text))
            ;; Run pandoc org → jira
            (text (go-jira-markup--pandoc-convert text "org" "jira"))
            ;; Post-process: restore placeholders, strip anchors, fix escaping

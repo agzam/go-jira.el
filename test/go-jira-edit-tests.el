@@ -399,6 +399,52 @@ Done issue description.
         (go-jira-edit--remove-overlay))
       (kill-buffer))))
 
+;;; Tests: Heading level shifting
+
+(describe "go-jira-markup-shift-headings"
+  (it "shifts heading levels by positive offset"
+    (expect (go-jira-markup-shift-headings "* Heading\nText" 2)
+            :to-equal "*** Heading\nText"))
+
+  (it "shifts heading levels by negative offset"
+    (expect (go-jira-markup-shift-headings "**** Wrap that\nSome text" -3)
+            :to-equal "* Wrap that\nSome text"))
+
+  (it "handles multiple heading levels"
+    (expect (go-jira-markup-shift-headings "**** Section\nText\n***** Sub-section\nMore text" -3)
+            :to-equal "* Section\nText\n** Sub-section\nMore text"))
+
+  (it "does not modify text without headings"
+    (expect (go-jira-markup-shift-headings "Just plain text\nwith multiple lines" -3)
+            :to-equal "Just plain text\nwith multiple lines"))
+
+  (it "clamps to level 1 minimum"
+    (expect (go-jira-markup-shift-headings "** Shallow heading\nText" -3)
+            :to-equal "* Shallow heading\nText"))
+
+  (it "returns text unchanged when offset is 0"
+    (expect (go-jira-markup-shift-headings "** Heading\nText" 0)
+            :to-equal "** Heading\nText"))
+
+  (it "does not modify bold/asterisk text that is not a heading"
+    (expect (go-jira-markup-shift-headings "This has *bold* and **double bold** inline" -3)
+            :to-equal "This has *bold* and **double bold** inline")))
+
+;;; Tests: Comment extraction with headings inside body
+
+(describe "go-jira-edit--extract-comments with headings in body"
+  (it "normalizes heading levels in extracted comment body"
+    (with-current-buffer (go-jira-edit-test--setup-view-buffer)
+      ;; Add a heading inside the first comment
+      (goto-char (point-min))
+      (re-search-forward "First comment body\\.")
+      (replace-match "**** Wrap that\nFirst comment body." t t)
+      (let ((comments (go-jira-edit--extract-comments)))
+        ;; comment-level is 3 (view mode: ticket=1, comments section=2, comment=3)
+        ;; So **** (level 4) should become * (level 1)
+        (expect (plist-get (car comments) :body) :to-match "^\\* Wrap that"))
+      (kill-buffer))))
+
 ;;; Tests: Change Detection
 
 (describe "go-jira-edit--has-changes-p"

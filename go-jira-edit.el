@@ -116,7 +116,9 @@ CONTEXT is a plist with ticket bounds.  If nil, uses current context."
                      (contents-begin (org-element-property :contents-begin element))
                      (contents-end (org-element-property :contents-end element)))
                 (if (and contents-begin contents-end)
-                    (string-trim (buffer-substring-no-properties contents-begin contents-end))
+                    (go-jira-markup-shift-headings
+                     (string-trim (buffer-substring contents-begin contents-end))
+                     (- desc-level))
                   "")))
           ;; No description found - return empty string
           "")))))
@@ -305,11 +307,14 @@ Returns a list of plists with :body and optionally :id for existing comments."
                      (comment-id (when (string-match "focusedCommentId=\\([0-9]+\\)" heading-text)
                                    (match-string 1 heading-text)))
                      (is-new (not comment-id))
-                     ;; Extract body content
+                     ;; Extract body content, normalizing heading levels
+                     ;; so user-added headings inside comments start at level 1
                      (contents-begin (org-element-property :contents-begin comment-element))
                      (contents-end (org-element-property :contents-end comment-element))
                      (body (if (and contents-begin contents-end)
-                               (string-trim (buffer-substring-no-properties contents-begin contents-end))
+                               (go-jira-markup-shift-headings
+                                (string-trim (buffer-substring contents-begin contents-end))
+                                (- comment-level))
                              "")))
 
                 ;; Include new comments OR existing comments (with ID in URL)

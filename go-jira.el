@@ -282,7 +282,8 @@ becomes SAC-28812__add_new_metadata_tap-asana"
             (insert (format "* %s: %s\n" key summary))
             (when description
               (insert "** Description\n")
-              (insert (go-jira-markup-to-org description))
+              (insert (go-jira-markup-shift-headings
+                       (go-jira-markup-to-org description) 2))
               (insert "\n\n"))
             (unless (s-blank-p subtasks-out)
               (insert "** Subtasks\n")
@@ -321,7 +322,8 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                         (put-text-property heading-start (point) 'jira-comment-author author-id))
                       ;; Only convert if body has markup
                       (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
-                          (insert (go-jira-markup-to-org body))
+                          (insert (go-jira-markup-shift-headings
+                                   (go-jira-markup-to-org body) 3))
                         (insert body))
                       (insert "\n\n"))))))
             (go-jira-view-mode)
