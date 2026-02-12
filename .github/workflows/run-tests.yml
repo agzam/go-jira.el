@@ -1,18 +1,34 @@
-name: run test
-on: [push, pull_request]
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
 jobs:
-  Testing:
+  test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        emacs-version: ['29.4', '30.1']
     steps:
-      - name: Check out
-        uses: actions/checkout@main
+      - uses: actions/checkout@v4
 
       - name: Install Emacs
         uses: purcell/setup-emacs@master
         with:
-          version: 29.4
+          version: ${{ matrix.emacs-version }}
 
-      - name: Install dependent packages
+      - name: Install Pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+
+      - name: Verify Pandoc
+        run: pandoc --version
+
+      - name: Install Emacs dependencies
         run: make deps
 
       - name: Run tests

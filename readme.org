@@ -21,7 +21,11 @@ You can still grab it directly from GitHub, here's the example Doom config:
 #+end_src
 
 ** Prerequisites
-Obviously, you need go-jira CLI installed, follow [[https://github.com/go-jira/jira][the instructions]]
+1. Obviously, you need go-jira CLI installed, follow [[https://github.com/go-jira/jira][the instructions]]
+
+2. You need pandoc installed and within the `$PATH`.
+   
+   /I tried really hard to build native elisp jira->org->jira conversion, yet it still became a whack-a-mole game wasting too much of my time/
 
 *** Auth
 It depends on the type of Jira instance you're trying to access. The package doesn't do anything here, so you *must* sort that out with the CLI first - make sure ~jira view <SOME-TICKET-NUMBER>~ in terminal works, before trying any go-jira Emacs commands.
