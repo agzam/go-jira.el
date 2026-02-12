@@ -82,16 +82,6 @@ Uses the serverInfo REST endpoint to determine the base URL."
         (error "Failed to get Jira base URL")
       result)))
 
-(defun go-jira--url (ticket)
-  "Get the browsable URL for TICKET."
-  (let* ((j (go-jira--find-exe))
-         (jq (go-jira--find-exe "jq"))
-         (cmd (format (concat
-                       "%s view %s --template json | %s -r '"
-                       "\"\\( .self | split(\"/rest\")[0] )/browse/\\( .key )\"'")
-                      j ticket jq)))
-    (string-trim (shell-command-to-string cmd))))
-
 (defun go-jira--summary+url (ticket)
   "Fetch summary and url for a given TICKET.
 Returns a plist with :ticket, :url, and :summary."

@@ -222,6 +222,13 @@ Protects elements that Pandoc's Org→Jira writer handles incorrectly:
   ;; Fix NOLANG marker: {code:NOLANG} → {code}
   (setq text (replace-regexp-in-string "{code:NOLANG}" "{code}" text t t))
 
+  ;; Fix older pandoc (< 3.6) converting #+begin_example → {code:example}
+  ;; instead of {noformat}.  Normalize to {noformat}.
+  (setq text (replace-regexp-in-string
+              "{code:example}\\(\\(?:.\\|\n\\)*?\\){code}"
+              "{noformat}\\1{noformat}"
+              text))
+
   ;; Fix trailing blank line before {code} and {noformat}
   ;; Pandoc adds an extra newline: "code\n\n{code}" → "code\n{code}"
   (setq text (replace-regexp-in-string "\n\n{code}" "\n{code}" text t t))

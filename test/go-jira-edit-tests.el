@@ -228,15 +228,6 @@ Done issue description.
 ;;; Tests: Comment Extraction
 
 (describe "go-jira-edit--extract-comments"
-  :var (original-get-user-id)
-  
-  (before-each
-    (setq original-get-user-id (symbol-function 'go-jira-edit--get-current-user-id))
-    (fset 'go-jira-edit--get-current-user-id (lambda () "user123")))
-  
-  (after-each
-    (fset 'go-jira-edit--get-current-user-id original-get-user-id))
-  
   (describe "in view mode"
     (it "extracts comments with IDs"
       (with-current-buffer (go-jira-edit-test--setup-view-buffer)
@@ -306,6 +297,95 @@ Done issue description.
           (go-jira-edit--remove-overlay)
           (widen))
         (kill-buffer)))))
+
+;;; Tests: Extraction with active overlay (the critical bug scenario)
+
+(describe "go-jira-edit--extract-title with active overlay"
+  (describe "in view mode"
+    (it "extracts title correctly while edit overlay is active"
+      (with-current-buffer (go-jira-edit-test--setup-view-buffer)
+        (let ((ctx (go-jira-edit--get-ticket-context)))
+          (go-jira-edit--create-overlay ctx)
+          ;; The overlay instruction line is now at point-min, before the heading.
+          ;; extract-title must still find the heading past the overlay.
+          (let ((title (go-jira-edit--extract-title)))
+            (expect title :to-equal "Test Issue Title"))
+          (go-jira-edit--remove-overlay))
+        (kill-buffer))))
+
+  (describe "in board mode"
+    (it "extracts title correctly while edit overlay is active"
+      (with-current-buffer (go-jira-edit-test--setup-board-buffer)
+        (goto-char (point-min))
+        (re-search-forward "^\\*\\* SAC-123")
+        (let ((ctx (go-jira-edit--get-ticket-context)))
+          (go-jira-edit--create-overlay ctx)
+          (let ((title (go-jira-edit--extract-title)))
+            (expect title :to-equal "Test Issue Title"))
+          (go-jira-edit--remove-overlay)
+          (widen))
+        (kill-buffer)))))
+
+(describe "go-jira-edit--extract-description with active overlay"
+  (describe "in view mode"
+    (it "extracts description correctly while edit overlay is active"
+      (with-current-buffer (go-jira-edit-test--setup-view-buffer)
+        (let ((ctx (go-jira-edit--get-ticket-context)))
+          (go-jira-edit--create-overlay ctx)
+          (let ((desc (go-jira-edit--extract-description)))
+            (expect desc :to-match "This is the description")
+            (expect desc :to-match "multiple lines"))
+          (go-jira-edit--remove-overlay))
+        (kill-buffer)))))
+
+(describe "go-jira-edit--extract-comments with active overlay"
+  (describe "in view mode"
+    (it "extracts comments correctly while edit overlay is active"
+      (with-current-buffer (go-jira-edit-test--setup-view-buffer)
+        (let ((ctx (go-jira-edit--get-ticket-context)))
+          (go-jira-edit--create-overlay ctx)
+          (let ((comments (go-jira-edit--extract-comments)))
+            (expect (length comments) :to-equal 2)
+            (expect (plist-get (car comments) :id) :to-equal "456")
+            (expect (plist-get (cadr comments) :id) :to-equal "789"))
+          (go-jira-edit--remove-overlay))
+        (kill-buffer)))))
+
+;;; Tests: Title change detection (the actual edit flow)
+
+(describe "go-jira-edit title change detection"
+  (it "detects title change when user edits the heading"
+    (with-current-buffer (go-jira-edit-test--setup-view-buffer)
+      (let ((ctx (go-jira-edit--get-ticket-context)))
+        (go-jira-edit--create-overlay ctx)
+        (let ((orig-title (overlay-get go-jira-edit--active-overlay 'original-title)))
+          ;; Verify original was stored correctly
+          (expect orig-title :to-equal "Test Issue Title")
+          ;; Simulate user editing the title
+          (save-excursion
+            (goto-char (point-min))
+            (re-search-forward "Test Issue Title")
+            (replace-match "New Title" t t))
+          ;; Now extract again and compare
+          (let* ((new-title (go-jira-edit--extract-title))
+                 (changed (not (string-equal (or orig-title "") (or new-title "")))))
+            (expect new-title :to-equal "New Title")
+            (expect changed :to-be-truthy)))
+        (go-jira-edit--remove-overlay))
+      (kill-buffer)))
+
+  (it "detects no change when title is not modified"
+    (with-current-buffer (go-jira-edit-test--setup-view-buffer)
+      (let ((ctx (go-jira-edit--get-ticket-context)))
+        (go-jira-edit--create-overlay ctx)
+        (let* ((orig-title (overlay-get go-jira-edit--active-overlay 'original-title))
+               (current-title (go-jira-edit--extract-title))
+               (changed (not (string-equal (or orig-title "") (or current-title "")))))
+          (expect orig-title :to-equal "Test Issue Title")
+          (expect current-title :to-equal "Test Issue Title")
+          (expect changed :to-be nil))
+        (go-jira-edit--remove-overlay))
+      (kill-buffer))))
 
 ;;; Tests: Change Detection
 

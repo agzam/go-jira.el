@@ -44,11 +44,6 @@ Only fetch after cursor has been stable on a ticket for this duration."
 (defvar-local go-jira--active-process nil
   "Currently active async process fetching ticket data.")
 
-(defface go-jira-popup-face
-  '((t :inherit default))
-  "Face for Jira ticket description popup."
-  :group 'go-jira)
-
 (defface go-jira-popup-border-face
   '((t :inherit font-lock-comment-face))
   "Face for Jira popup border."
@@ -85,15 +80,6 @@ Only fetch after cursor has been stable on a ticket for this duration."
   (interactive)
   (clrhash go-jira-eldoc-cache)
   (message "Jira eldoc cache cleared"))
-
-(defun go-jira-eldoc--fetch-description (ticket)
-  "Fetch description for TICKET, using cache when available."
-  (or (go-jira-eldoc--cache-get ticket)
-      (when-let ((summary (condition-case nil
-                              (go-jira-summary ticket)
-                            (error nil))))
-        (go-jira-eldoc--cache-put ticket summary)
-        summary)))
 
 (defun go-jira-eldoc--fetch-description-async (ticket callback)
   "Fetch description for TICKET asynchronously, call CALLBACK with result.

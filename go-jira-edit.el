@@ -62,6 +62,30 @@ Inherits from org-mode-map, overrides submit and abort.")
   :lighter " JiraDesc"
   :keymap go-jira-edit-mode-map)
 
+(defun go-jira-edit--ticket-heading-start (&optional start)
+  "Find the actual ticket heading position, skipping the edit overlay.
+START is the beginning of the region to search (default `point-min').
+When the edit overlay is active, its instruction line sits before the
+heading, so `point-min' or `:start' from context no longer points at
+the heading.  This function skips past the overlay to find the first
+Org heading."
+  (save-excursion
+    (goto-char (or start (point-min)))
+    (if (and go-jira-edit--active-overlay
+             (overlay-buffer go-jira-edit--active-overlay))
+        (let ((ov-end (overlay-end go-jira-edit--active-overlay)))
+          (goto-char (max (or start (point-min)) ov-end))
+          ;; Find next heading if not already on one
+          (unless (org-at-heading-p)
+            (re-search-forward "^\\*+ " nil t)
+            (goto-char (line-beginning-position)))
+          (point))
+      ;; No overlay - use start as-is, but ensure we're on a heading
+      (unless (org-at-heading-p)
+        (re-search-forward "^\\*+ " nil t)
+        (goto-char (line-beginning-position)))
+      (point))))
+
 (defun go-jira-edit--extract-title (&optional context)
   "Extract the ticket title.
 CONTEXT is a plist with ticket bounds.  If nil, uses current context."
@@ -69,7 +93,7 @@ CONTEXT is a plist with ticket bounds.  If nil, uses current context."
     (save-excursion
       (save-restriction
         (widen)
-        (goto-char (plist-get ctx :start))
+        (goto-char (go-jira-edit--ticket-heading-start (plist-get ctx :start)))
         (let* ((element (org-element-at-point))
                (raw-value (org-element-property :raw-value element)))
           ;; Strip the "KEY: " prefix to get just the title
@@ -87,7 +111,7 @@ CONTEXT is a plist with ticket bounds.  If nil, uses current context."
     (save-excursion
       (save-restriction
         (widen)
-        (goto-char start)
+        (goto-char (go-jira-edit--ticket-heading-start start))
         ;; Find Description heading within ticket bounds
         (if (re-search-forward
              (format "^\\*\\{%d\\} Description[ \t]*$" desc-level)
@@ -265,25 +289,7 @@ If buffer is narrowed, uses narrowed bounds instead of absolute positions."
 
    (t (user-error "Not in a Jira buffer"))))
 
-;;; Comment extraction and user identification
-
-(defvar go-jira-edit--current-user-id nil
-  "Cache for current user's Jira account ID.")
-
-(defun go-jira-edit--get-current-user-id ()
-  "Get the current user's Jira account ID.
-Fetches from Jira API and caches the result."
-  (or go-jira-edit--current-user-id
-      (let* ((j (go-jira--find-exe))
-             (json-output (shell-command-to-string (format "%s session --template json" j))))
-        (condition-case nil
-            (let* ((json-object-type 'hash-table)
-                   (json-key-type 'symbol)
-                   (parsed (json-read-from-string json-output))
-                   (account-id (gethash 'accountId parsed)))
-              (setq go-jira-edit--current-user-id account-id)
-              account-id)
-          (error nil)))))
+;;; Comment extraction
 
 (defun go-jira-edit--extract-comments (&optional context)
   "Extract user's comments from the ticket.
@@ -295,12 +301,11 @@ Returns a list of plists with :body and optionally :id for existing comments."
          (level (plist-get ctx :level))
          (comments-level (+ level 1))  ; Comments heading is one level below ticket
          (comment-level (+ level 2))   ; Individual comments are two levels below ticket
-         ;; (_current-user (go-jira-edit--get-current-user-id))
          comments)
     (save-excursion
       (save-restriction
         (widen)
-        (goto-char start)
+        (goto-char (go-jira-edit--ticket-heading-start start))
         ;; Find Comments section within ticket bounds
         (when (re-search-forward
                (format "^\\*\\{%d\\} Comments[ \t]*$" comments-level)

@@ -150,18 +150,6 @@ Returns a list of sprint IDs, or nil if no active sprints."
        (message "Warning: Could not fetch active sprints: %s" (error-message-string err))
        nil))))
 
-(defun go-jira--board-candidate (board)
-  "Create a consult candidate from BOARD plist.
-Returns a propertized string with board data attached."
-  (let* ((name (plist-get board :name))
-         (type (plist-get board :type))
-         (project (plist-get board :project))
-         (annotation (format " [%s] (%s)" type project)))
-    (propertize name
-                'board-data board
-                'consult--candidate name
-                'consult--annotation annotation)))
-
 (defun go-jira--get-board-data (board-id name type project)
   "Fetch complete board data for BOARD-ID, NAME, TYPE, PROJECT.
 Returns a plist with all board information including JQL and columns."
@@ -247,28 +235,6 @@ Handles pagination automatically.  Returns a list of issue plists."
                       (error-message-string err) output)))))))
     (message "Fetched %d issues from board" (length all-issues))
     all-issues))
-
-(defun go-jira--fetch-issues-by-jql (jql &optional limit)
-  "Fetch issues matching JQL query.
-Returns a list of issue plists with :key, :summary, :status, etc.
-Optional LIMIT restricts number of results (default: 1000)."
-  (let* ((j (go-jira--find-exe))
-         ;; Default to 1000 if no limit specified to ensure we get all results
-         (limit-arg (format " --limit %d" (or limit 1000)))
-         (cmd (format "%s list --query '%s' --queryfields 'key,summary,status,assignee,priority,labels,issuetype' --template json%s"
-                      j jql limit-arg))
-         (output (shell-command-to-string cmd)))
-    (condition-case err
-        (let* ((json-object-type 'hash-table)
-               (json-key-type 'symbol)
-               (json-array-type 'list)
-               (parsed (json-read-from-string output))
-               (issues (gethash 'issues parsed)))
-          (unless issues
-            (error "No issues found for JQL query"))
-          (mapcar #'go-jira--parse-issue issues))
-      (error
-       (error "Failed to fetch issues: %s\nOutput: %s" (error-message-string err) output)))))
 
 (defun go-jira--parse-issue (issue-json)
   "Parse ISSUE-JSON hash-table into a plist."
