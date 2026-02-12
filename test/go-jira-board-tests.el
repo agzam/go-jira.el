@@ -31,9 +31,9 @@
 (unless (featurep 'go-jira-markup)
   (load-file "go-jira-markup.el"))
 
-(unless (featurep 'go-jira-comment)
-  (provide 'go-jira-comment)
-  (defun go-jira-add-comment () nil))
+(unless (featurep 'go-jira-edit)
+  (provide 'go-jira-edit)
+  (defun go-jira-edit () nil))
 
 (load-file "go-jira-board.el")
 

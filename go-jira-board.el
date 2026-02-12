@@ -1,27 +1,22 @@
 ;;; go-jira-board.el --- Jira board browsing for go-jira -*- lexical-binding: t; -*-
-
 ;; Copyright (C) 2024 Ag Ibragimov
-
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
+;; URL: https://github.com/agzam/go-jira.el
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-
 ;; This file is not part of GNU Emacs.
-
 ;;; Commentary:
-
-;; Functions for browsing and displaying Jira boards.
-;; Provides consult-based board selection and configuration retrieval.
-
+;; jira board viewer
 ;;; Code:
 
 (require 'json)
 (require 'consult)
 (require 'go-jira)
 (require 'go-jira-markup)
-(require 'go-jira-comment)
+(require 'go-jira-edit)
+
 
 (defcustom go-jira-default-project "SAC"
   "Default Jira project key for board browsing."
@@ -38,14 +33,14 @@ Note: When enabled, this fetches issues from all active sprints on the board."
 (defcustom go-jira-board-cache-duration 120
   "Number of seconds to cache issue content before refetching.
 When expanding an issue heading, content will be fetched only if the cache
-has expired. Set to 0 to always fetch fresh data."
+has expired.  Set to 0 to always fetch fresh data."
   :type 'integer
   :group 'go-jira)
 
 (defcustom go-jira-default-board-id nil
   "Default board ID for quick access via `go-jira-browse-default-board'.
 Set this to your most frequently used board ID to jump directly to it
-without board selection. You can find the board ID in the board URL or by
+without board selection.  You can find the board ID in the board URL or by
 inspecting the board-data plist from `go-jira-browse-boards'."
   :type '(choice (const :tag "None" nil)
                  (integer :tag "Board ID"))
@@ -195,7 +190,7 @@ Returns a plist with all board information including JQL and columns."
 (defun go-jira--fetch-board-issues (board-id &optional sprint-ids)
   "Fetch all issues for BOARD-ID using the Jira board API.
 If SPRINT-IDS (a list) is provided, fetch issues from those sprints.
-Handles pagination automatically. Returns a list of issue plists."
+Handles pagination automatically.  Returns a list of issue plists."
   (let* ((j (go-jira--find-exe))
          (all-issues '()))
     (if sprint-ids
@@ -205,7 +200,7 @@ Handles pagination automatically. Returns a list of issue plists."
                 (max-results 100)
                 (total nil))
             (while (or (null total) (< start-at total))
-              (let* ((endpoint (format "/rest/agile/1.0/board/%d/sprint/%d/issue?startAt=%d&maxResults=%d" 
+              (let* ((endpoint (format "/rest/agile/1.0/board/%d/sprint/%d/issue?startAt=%d&maxResults=%d"
                                        board-id sprint-id start-at max-results))
                      (cmd (format "%s request '%s' --method GET" j endpoint))
                      (output (shell-command-to-string cmd)))
@@ -223,14 +218,14 @@ Handles pagination automatically. Returns a list of issue plists."
                       (when (zerop returned)
                         (setq start-at total)))
                   (error
-                   (error "Failed to fetch sprint issues: %s\nOutput: %s" 
+                   (error "Failed to fetch sprint issues: %s\nOutput: %s"
                           (error-message-string err) output)))))))
       ;; Fetch all board issues (no sprint filter)
       (let ((start-at 0)
             (max-results 100)
             (total nil))
         (while (or (null total) (< start-at total))
-          (let* ((endpoint (format "/rest/agile/1.0/board/%d/issue?startAt=%d&maxResults=%d" 
+          (let* ((endpoint (format "/rest/agile/1.0/board/%d/issue?startAt=%d&maxResults=%d"
                                    board-id start-at max-results))
                  (cmd (format "%s request '%s' --method GET" j endpoint))
                  (output (shell-command-to-string cmd)))
@@ -248,7 +243,7 @@ Handles pagination automatically. Returns a list of issue plists."
                   (when (zerop returned)
                     (setq start-at total)))
               (error
-               (error "Failed to fetch board issues: %s\nOutput: %s" 
+               (error "Failed to fetch board issues: %s\nOutput: %s"
                       (error-message-string err) output)))))))
     (message "Fetched %d issues from board" (length all-issues))
     all-issues))
@@ -314,7 +309,7 @@ Returns an alist of (column-name . (issue-list))."
     (nreverse grouped)))
 
 (defun go-jira--build-board-buffer (board-data issues)
-  "Build and return 'org-mode' buffer for BOARD-DATA with ISSUES."
+  "Build and return `org-mode' buffer for BOARD-DATA with ISSUES."
   (let* ((board-name (plist-get board-data :name))
          (columns (plist-get board-data :columns))
          (grouped (go-jira--group-issues-by-column issues columns))
@@ -323,11 +318,11 @@ Returns an alist of (column-name . (issue-list))."
     (with-current-buffer buf
       (setq-local buffer-read-only nil)
       (erase-buffer)
-      
+
       ;; Insert org-columns setup
       (insert "#+COLUMNS: %50ITEM %12TODO %15ASSIGNEE %12PRIORITY %10ISSUETYPE %25LABELS\n")
       (insert "#+TITLE: " board-name "\n\n")
-      
+
       ;; Insert each column with its issues
       (dolist (col-group grouped)
         (let ((col-name (car col-group))
@@ -336,7 +331,7 @@ Returns an alist of (column-name . (issue-list))."
           (when col-issues
             (dolist (issue col-issues)
               (go-jira--insert-issue issue)))))
-      
+
       (go-jira-board-view-mode)
       (setq-local go-jira--board-data board-data)
       (goto-char (point-min))
@@ -374,13 +369,12 @@ Returns an alist of (column-name . (issue-list))."
 (defvar go-jira-board-view-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'go-jira-board-view-issue)
-    (define-key map (kbd "b") #'go-jira-board-browse-issue-url)
-    (define-key map (kbd "r") #'go-jira-board-refresh)
-    (define-key map (kbd "C") #'go-jira-add-comment)
-    (define-key map (kbd "q") #'quit-window)
-    (define-key map (kbd "C-c C-c") #'org-columns)
+    (define-key map (kbd "C-c M-e") #'go-jira-edit)
+    (define-key map (kbd "C-c C-o") #'go-jira-board-browse-issue-url)
+    (define-key map (kbd "C-c M-r") #'go-jira-board-refresh)
+    (define-key map (kbd "C-c M-q") #'quit-window)
     map)
-  "Keymap for `go-jira-board-view-mode'.")
+  "Keymap for go-jira-board-view-mode.")
 
 (defun go-jira--on-cycle-expand-issue (state)
   "Hook function to fetch issue content on heading expansion.
@@ -461,8 +455,7 @@ will have BASE-LEVEL asterisks added to it."
     (when details
       (save-excursion
         (org-back-to-heading t)
-        (let* ((heading-pos (point))
-               (current-level (org-outline-level))
+        (let* ((current-level (org-outline-level))
                ;; Description and Comments are always 1 level below the issue
                (description-level (1+ current-level))
                ;; Comment authors are 1 level below Comments
@@ -476,7 +469,7 @@ will have BASE-LEVEL asterisks added to it."
                 (comments (plist-get details :comments))
                 ;; Temporarily remove org-fold hook to prevent it from "fixing" visibility
                 (after-change-functions (remove 'org-fold-core--fix-folded-region after-change-functions)))
-            
+
             ;; Insert description directly (no heading)
             (when description
               (insert "\n")
@@ -485,19 +478,19 @@ will have BASE-LEVEL asterisks added to it."
                   ;; Adjust any headings in the description to be relative to current issue level
                   (insert (go-jira--adjust-heading-levels converted current-level)))
                 (insert "\n")))
-            
+
             ;; Insert subtasks
             (when-let ((subtasks (go-jira--fetch-subtasks issue-key)))
               (insert (format "%s Subtasks\n" (make-string description-level ?*)))
               (insert subtasks)
               (insert "\n\n"))
-            
+
             ;; Insert linked items
             (when-let ((linked (go-jira--fetch-linked-items issue-key)))
               (insert (format "%s Linked work items\n" (make-string description-level ?*)))
               (insert linked)
               (insert "\n\n"))
-            
+
             ;; Insert comments
             (when comments
               (insert (format "%s Comments\n" (make-string description-level ?*)))
@@ -530,24 +523,22 @@ will have BASE-LEVEL asterisks added to it."
                         ;; Plain text comment, insert as-is
                         (insert body))
                       (insert "\n"))))))
-            
+
             ;; Ensure proper separation from next heading
             (unless (looking-at-p "^\\s-*$")
               (insert "\n"))))))))
 
 (define-derived-mode go-jira-board-view-mode org-mode "Jira-Board"
-  "Major mode for viewing Jira boards in 'org-mode' format.
+  "Major mode for viewing Jira boards in `org-mode' format.
 \\{go-jira-board-view-mode-map}"
   :group 'go-jira
   (setq-local buffer-read-only t)
   (setq-local go-jira--expanded-issues (make-hash-table :test 'equal))
   (add-hook 'org-cycle-hook #'go-jira--on-cycle-expand-issue nil t)
-  
+
   ;; Add font-lock for Jira headings
   (font-lock-add-keywords nil
-   '((go-jira--fontify-jira-headings)))
-  
-  (message "Press 'C-c C-c' to toggle columns view, 'RET' to view issue, 'C' to add comment, 'b' to browse in browser, 'r' to refresh, 'q' to quit"))
+   '((go-jira--fontify-jira-headings))))
 
 (defun go-jira-board-view-issue ()
   "View the Jira issue at point."
@@ -577,12 +568,12 @@ will have BASE-LEVEL asterisks added to it."
 ;;;###autoload
 (defun go-jira-browse-boards (&optional project display)
   "Browse and select a Jira board.
-With prefix arg, prompt for PROJECT. Otherwise use
+With prefix arg, prompt for PROJECT.  Otherwise use
 `go-jira-default-project'.
 
 When called interactively, automatically displays the board.
 When called from Lisp, returns a plist with complete board data
-including JQL query and column mappings. Pass DISPLAY non-nil
+including JQL query and column mappings.  Pass DISPLAY non-nil
 to display the board immediately."
   (interactive
    (list (when current-prefix-arg
@@ -624,15 +615,15 @@ to display the board immediately."
 (defun go-jira-display-board (&optional board-data force-refresh)
   "Display a Jira board in `org-mode' format.
 If BOARD-DATA is not provided, prompts for board selection via
-`go-jira-browse-boards'. BOARD-DATA should be a plist with :id
+`go-jira-browse-boards'.  BOARD-DATA should be a plist with :id
 and :columns keys.
 
 When `go-jira-board-show-active-sprint-only' is non-nil,
-only shows issues in the active sprints. Otherwise shows all
+only shows issues in the active sprints.  Otherwise shows all
 issues on the board.
 
 If a buffer for this board already exists and FORCE-REFRESH is nil,
-simply switches to that buffer without re-fetching data. Use
+simply switches to that buffer without re-fetching data.  Use
 FORCE-REFRESH non-nil to force fetching fresh data.
 
 When called interactively, uses prefix argument to force refresh."
@@ -651,7 +642,7 @@ When called interactively, uses prefix argument to force refresh."
         ;; Otherwise, fetch and rebuild
         (let* ((board-id (plist-get board-data :id))
                (active-sprint-ids (plist-get board-data :active-sprint-ids))
-               (sprint-ids (when go-jira-board-show-active-sprint-only 
+               (sprint-ids (when go-jira-board-show-active-sprint-only
                              active-sprint-ids)))
           (when (and go-jira-board-show-active-sprint-only (not active-sprint-ids))
             (message "Warning: No active sprints found, showing all board issues"))
@@ -661,7 +652,7 @@ When called interactively, uses prefix argument to force refresh."
           (let* ((issues (go-jira--fetch-board-issues board-id sprint-ids))
                  (buf (go-jira--build-board-buffer board-data issues)))
             (switch-to-buffer buf)
-            (message "Loaded %d issues. Press 'C-c C-c' for columns view." (length issues))))))))
+            (message "Loaded %d issues. " (length issues))))))))
 
 ;;;###autoload
 (defun go-jira-set-default-board ()
@@ -673,8 +664,8 @@ and `go-jira-default-board-name' for use with `go-jira-browse-default-board'."
     (when board-data
       (customize-save-variable 'go-jira-default-board-id (plist-get board-data :id))
       (customize-save-variable 'go-jira-default-board-name (plist-get board-data :name))
-      (message "Default board set to: %s (ID: %d)" 
-               go-jira-default-board-name 
+      (message "Default board set to: %s (ID: %d)"
+               go-jira-default-board-name
                go-jira-default-board-id))))
 
 ;;;###autoload
@@ -715,8 +706,13 @@ frequently used board without going through board selection."
             (go-jira-display-board board-data t))))
     ;; No default board configured, fall back to browse
     (message "No default board configured. Use M-x go-jira-set-default-board to configure one.")
-    (when (y-or-n-p "No default board configured. Set one now? ")
+    (when (y-or-n-p "No default board configured.  Set one now? ")
       (call-interactively #'go-jira-set-default-board))))
 
 (provide 'go-jira-board)
 ;;; go-jira-board.el ends here
+
+;; Local Variables:
+;; package-lint-main-file: "go-jira.el"
+;; End:
+

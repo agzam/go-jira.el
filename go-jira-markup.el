@@ -6,6 +6,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira, markup
+;; URL: https://github.com/agzam/go-jira.el
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is not part of GNU Emacs.
@@ -60,7 +61,7 @@ Also strips surrounding {quote} blocks if they wrap code blocks."
               "{quote}\\({\\(?:code\\|noformat\\)[^}]*}\\(?:.\\|\n\\)*?{\\(?:code\\|noformat\\)}\\){quote}"
               "\\1"
               text))
-  
+
   ;; Code blocks with language
   (setq text (replace-regexp-in-string
               "{code:\\([^}]+\\)}\\(\\(?:.\\|\n\\)*?\\){code}"
@@ -70,7 +71,7 @@ Also strips surrounding {quote} blocks if they wrap code blocks."
                        (org-block (format "\n#+begin_src %s\n%s\n#+end_src\n" lang content)))
                   (go-jira-markup--protect-block org-block)))
               text))
-  
+
   ;; Code blocks without language
   (setq text (replace-regexp-in-string
               "{code}\\(\\(?:.\\|\n\\)*?\\){code}"
@@ -79,7 +80,7 @@ Also strips surrounding {quote} blocks if they wrap code blocks."
                        (org-block (format "\n#+begin_src\n%s\n#+end_src\n" content)))
                   (go-jira-markup--protect-block org-block)))
               text))
-  
+
   ;; Noformat blocks
   (setq text (replace-regexp-in-string
               "{noformat}\\(\\(?:.\\|\n\\)*?\\){noformat}"
@@ -88,63 +89,63 @@ Also strips surrounding {quote} blocks if they wrap code blocks."
                        (org-block (format "\n#+begin_example\n%s\n#+end_example\n" content)))
                   (go-jira-markup--protect-block org-block)))
               text))
-  
+
   text)
 
 (defun go-jira-markup--convert-quote-blocks (text)
   "Convert Jira quote blocks of TEXT to Org-mode quote blocks.
-Handles both {quote}...{quote} and bq. syntax."
+Handles both {quote}...{quote} and `bq.' syntax."
   ;; Multi-line quotes
   (setq text (replace-regexp-in-string
               "{quote}\\(\\(?:.\\|\n\\)*?\\){quote}"
               "\n#+begin_quote\n\\1\n#+end_quote\n"
               text))
-  
+
   ;; Single-line block quotes
   (setq text (replace-regexp-in-string
               "^bq\\. \\(.+\\)$"
               "\n#+begin_quote\n\\1\n#+end_quote\n"
               text))
-  
+
   text)
 
 (defun go-jira-markup--convert-headings (text)
   "Convert Jira headings of TEXT to plain text with jira-heading property.
 We add a custom property that font-lock will use to apply faces."
-  (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)" 
+  (setq text (replace-regexp-in-string "^h1\\. \\(.+\\)"
               (lambda (match)
                 (let ((content (match-string 1 match)))
-                  (go-jira-markup--protect-block 
+                  (go-jira-markup--protect-block
                    (propertize content 'jira-heading 1 'font-lock-multiline t))))
               text))
-  (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)" 
+  (setq text (replace-regexp-in-string "^h2\\. \\(.+\\)"
               (lambda (match)
                 (let ((content (match-string 1 match)))
-                  (go-jira-markup--protect-block 
+                  (go-jira-markup--protect-block
                    (propertize content 'jira-heading 2 'font-lock-multiline t))))
               text))
-  (setq text (replace-regexp-in-string "^h3\\. \\(.+\\)" 
+  (setq text (replace-regexp-in-string "^h3\\. \\(.+\\)"
               (lambda (match)
                 (let ((content (match-string 1 match)))
-                  (go-jira-markup--protect-block 
+                  (go-jira-markup--protect-block
                    (propertize content 'jira-heading 3 'font-lock-multiline t))))
               text))
-  (setq text (replace-regexp-in-string "^h4\\. \\(.+\\)" 
+  (setq text (replace-regexp-in-string "^h4\\. \\(.+\\)"
               (lambda (match)
                 (let ((content (match-string 1 match)))
-                  (go-jira-markup--protect-block 
+                  (go-jira-markup--protect-block
                    (propertize content 'jira-heading 4 'font-lock-multiline t))))
               text))
-  (setq text (replace-regexp-in-string "^h5\\. \\(.+\\)" 
+  (setq text (replace-regexp-in-string "^h5\\. \\(.+\\)"
               (lambda (match)
                 (let ((content (match-string 1 match)))
-                  (go-jira-markup--protect-block 
+                  (go-jira-markup--protect-block
                    (propertize content 'jira-heading 5 'font-lock-multiline t))))
               text))
-  (setq text (replace-regexp-in-string "^h6\\. \\(.+\\)" 
+  (setq text (replace-regexp-in-string "^h6\\. \\(.+\\)"
               (lambda (match)
                 (let ((content (match-string 1 match)))
-                  (go-jira-markup--protect-block 
+                  (go-jira-markup--protect-block
                    (propertize content 'jira-heading 6 'font-lock-multiline t))))
               text))
   text)
@@ -152,10 +153,9 @@ We add a custom property that font-lock will use to apply faces."
 (defun go-jira-markup--convert-lists (text)
   "Convert Jira lists of TEXT to Org-mode lists.
 Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
-  (let ((lines (split-string text "\n"))
-        (result '())
-        (counters (make-hash-table :test 'equal))
-        (last-was-nested nil)) ; Track if last line was #* or *#
+  (let* ((lines (split-string text "\n"))
+         (result '())
+         (counters (make-hash-table :test 'equal)))
     (dolist (line lines)
       (cond
        ;; #*, #**, #*** pattern: bullets nested under number
@@ -166,12 +166,11 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
                (num-indent (* (length prefix1) 2))
                (bullet-indent (+ num-indent (* (1- (length prefix2)) 2)))
                (indent (make-string bullet-indent ?\s)))
-          (setq last-was-nested 'hash-star)
           ;; Ensure any #+begin blocks in content are on their own line
           (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s- %s" indent content) result)))
-       
-       ;; *# pattern: numbered item nested under bullet  
+
+       ;; *# pattern: numbered item nested under bullet
        ((string-match "^\\([*+-]+\\)\\(#+\\) \\(.+\\)$" line)
         (let* ((prefix1 (match-string 1 line))
                (prefix2 (match-string 2 line))
@@ -182,11 +181,10 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
                (level-key (format "%s-%s" prefix1 prefix2))
                (counter (1+ (gethash level-key counters 0))))
           (puthash level-key counter counters)
-          (setq last-was-nested 'star-hash)
           ;; Ensure any #+begin blocks in content are on their own line
           (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s%d. %s" indent counter content) result)))
-       
+
        ;; Numbered list: # → 1., ## → "  1."
        ((string-match "^\\(#+\\) \\(.+\\)$" line)
         (let* ((level (match-string 1 line))
@@ -196,32 +194,29 @@ Handles numbered (#), bulleted (*), mixed (#*, *#) lists."
                (counter (1+ (gethash level-key counters 0))))
           (puthash level-key counter counters)
           ;; Reset counters for deeper levels
-          (maphash (lambda (k v)
-                     (when (> k level-key)
+          (maphash (lambda (k _v)
+                     (when (< level-key k)
                        (puthash k 0 counters)))
                    counters)
-          (setq last-was-nested nil)
           ;; Ensure any #+begin blocks in content are on their own line
           (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s%d. %s" indent counter content) result)))
-       
+
        ;; Bulleted list: * → -, ** → "  -"
        ((string-match "^\\([*+-]+\\) \\(.+\\)$" line)
         (let* ((level (match-string 1 line))
                (content (match-string 2 line))
                (indent (make-string (* (1- (length level)) 2) ?\s)))
-          (setq last-was-nested nil)
           ;; Ensure any #+begin blocks in content are on their own line
           (setq content (replace-regexp-in-string "\\(#+begin_\\)" "\n\\1" content))
           (push (format "%s- %s" indent content) result)))
-       
+
        ;; Empty line or non-list content - reset
        (t
         (when (string-empty-p (string-trim line))
-          (clrhash counters)
-          (setq last-was-nested nil))
+          (clrhash counters))
         (push line result))))
-    
+
     (mapconcat #'identity (nreverse result) "\n")))
 
 (defun go-jira-markup--convert-tables (text)
@@ -242,16 +237,16 @@ Handles || for headers and | for regular cells."
                    (separator (concat "|" (mapconcat (lambda (_) "---") cells "|") "|")))
               (push separator result)
               (setq in-table t)))))
-       
+
        ;; Regular row with pipes
        ((and (string-match "^|" line) (string-match "|$" line))
         (push line result))
-       
+
        ;; End of table
        (t
         (setq in-table nil)
         (push line result))))
-    
+
     (mapconcat #'identity (nreverse result) "\n")))
 
 ;;; Inline conversions
@@ -270,16 +265,16 @@ Handles bold, italic, monospace, etc."
                   ;; Add hair space around code to prevent org-mode interpretation issues
                   (go-jira-markup--protect-block (format "\u200A~%s~\u200A" content))))
               text))
-  
+
   ;; Bold: *text* → *text* (org-mode uses single asterisk for bold)
   ;; No conversion needed, already correct
-  
+
   ;; Italic: _text_ → /text/
   (setq text (replace-regexp-in-string
               "\\(^\\|[[:space:]]\\)_\\([^_\n]+?\\)_\\([[:space:]]\\|$\\)"
               "\\1/\\2/\\3"
               text))
-  
+
   ;; Strikethrough: -text- → +text+ (protect it so Insert doesn't convert it)
   ;; Match -text- including internal hyphens like "sub-type"
   ;; Match with space before and space/eol/punct after
@@ -301,31 +296,31 @@ Handles bold, italic, monospace, etc."
                   (concat (go-jira-markup--protect-block (format "+%s+" content))
                           after)))
               text))
-  
+
   ;; Insert: +text+ → _text_
   (setq text (replace-regexp-in-string
               "\\(^\\|[ \t]\\)\\+\\([^+\n]+?\\)\\+\\([ \t]\\|$\\)"
               "\\1_\\2_\\3"
               text))
-  
+
   ;; Superscript: ^text^ → ^{text}
   (setq text (replace-regexp-in-string
               "\\^\\([^^]+?\\)\\^"
               "^{\\1}"
               text))
-  
+
   ;; Subscript: ~text~ → _{text}
   (setq text (replace-regexp-in-string
               "~\\([^~]+?\\)~"
               "_{\\1}"
               text))
-  
+
   ;; Citation: ??text?? → /text/ (escape the question marks!)
   (setq text (replace-regexp-in-string
               "\\?\\?\\([^?]+?\\)\\?\\?"
               "/\\1/"
               text))
-  
+
   text)
 
 (defun go-jira-markup--convert-links (text)
@@ -336,20 +331,20 @@ Handles [text|url|smart-link], [text|url], and [url]."
               "\\[\\([^]|]+\\)|\\([^]|]+\\)|[^]]+\\]"
               "[[\\2][\\1]]"
               text))
-  
+
   ;; Links with 2 parts: [text|url] → [[url][text]]
   (setq text (replace-regexp-in-string
               "\\[\\([^]|]+\\)|\\([^]|]+\\)\\]"
               "[[\\2][\\1]]"
               text))
-  
+
   ;; Links with 1 part: [url] → [[url]]
   ;; But don't match if already converted to org format [[...]]
   (setq text (replace-regexp-in-string
               "\\(^\\|[^[]\\)\\[\\([^]|[]+\\)\\]\\($\\|[^]]\\)"
               "\\1[[\\2]]\\3"
               text))
-  
+
   text)
 
 (defun go-jira-markup--convert-images (text)
@@ -360,19 +355,19 @@ Handles !image.png!, !image.png|alt=text!, etc."
               "!\\([^|!]+\\)|[^!]*alt=\\([^,!]+\\)[^!]*!"
               "[[file:\\1][\\2]]"
               text))
-  
+
   ;; Images with other params (ignore params): !image.png|params! → [[file:image.png]]
   (setq text (replace-regexp-in-string
               "!\\([^|!]+\\)|[^!]+!"
               "[[file:\\1]]"
               text))
-  
+
   ;; Simple images: !image.png! → [[file:image.png]]
   (setq text (replace-regexp-in-string
               "!\\([^!]+\\)!"
               "[[file:\\1]]"
               text))
-  
+
   text)
 
 (defun go-jira-markup--convert-colors (text)
@@ -418,7 +413,7 @@ Returns the converted text as a string."
         ;; Phase 1: Protect and convert code blocks
         (when (string-match-p "{\\(?:code\\|noformat\\)}" text)
           (setq text (go-jira-markup--convert-code-blocks text)))
-        
+
         ;; Phase 2: Inline conversions (BEFORE lists, so strikethrough works in list items)
         (setq text (go-jira-markup--convert-inline-formatting text))
         (when (string-match-p "\\[" text)
@@ -429,7 +424,7 @@ Returns the converted text as a string."
           (setq text (go-jira-markup--convert-quote-blocks text)))
         (when (string-match-p "[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}T" text)
           (setq text (go-jira-markup--convert-datetimes text)))
-        
+
         ;; Phase 3: Block-level conversions
         (when (string-match-p "^h[1-6]\\." text)
           (setq text (go-jira-markup--convert-headings text)))
@@ -437,14 +432,14 @@ Returns the converted text as a string."
           (setq text (go-jira-markup--convert-lists text)))
         (when (string-match-p "^|" text)
           (setq text (go-jira-markup--convert-tables text)))
-        
+
         ;; Phase 4: Restore protected blocks
         (when go-jira-markup--protected-blocks
           (setq text (go-jira-markup--restore-blocks text)))
-        
+
         ;; Phase 5: Clean up whitespace
         (setq text (go-jira-markup--clean-whitespace text))
-        
+
         ;; Trim trailing whitespace
         (string-trim-right text)))))
 
@@ -454,17 +449,18 @@ Returns the converted text as a string."
 - Remove empty lines immediately after headings"
   ;; First collapse multiple empty lines into one
   (setq text (replace-regexp-in-string "\n\n\n+" "\n\n" text))
-  
+
   ;; Remove empty lines immediately after org headings
   ;; Pattern: heading line (with newline) followed by another newline (empty line)
   (setq text (replace-regexp-in-string "\\(^\\*+ .+\n\\)\n" "\\1" text))
-  
+
   text)
 
 ;;; Org-mode to Jira markup conversion
 
 (defvar go-jira-markup--org-protected-blocks nil
-  "Alist of (placeholder . original-content) for protected blocks during Org->Jira conversion.")
+  "Alist of (placeholder . original-content).
+For protected blocks during Org->Jira conversion.")
 
 (defun go-jira-markup--org-protect-block (content)
   "Protect CONTENT from processing by replacing it with a placeholder.
@@ -495,7 +491,7 @@ Handles #+begin_src lang ... #+end_src and #+begin_example ... #+end_example."
                        (jira-block (format "{code:%s}\n%s\n{code}" lang content)))
                   (go-jira-markup--org-protect-block jira-block)))
               text))
-  
+
   ;; Source blocks without language
   (setq text (replace-regexp-in-string
               "\\(?:^\\|\\`\\)[ \t]*#\\+begin_src[ \t]*\n\\(\\(?:.\\|\n\\)*?\\)\n[ \t]*#\\+end_src[ \t]*\\(?:$\\|\\'\\|\n\\)"
@@ -504,7 +500,7 @@ Handles #+begin_src lang ... #+end_src and #+begin_example ... #+end_example."
                        (jira-block (format "{code}\n%s\n{code}" content)))
                   (go-jira-markup--org-protect-block jira-block)))
               text))
-  
+
   ;; Example blocks
   (setq text (replace-regexp-in-string
               "\\(?:^\\|\\`\\)[ \t]*#\\+begin_example[ \t]*\n\\(\\(?:.\\|\n\\)*?\\)\n[ \t]*#\\+end_example[ \t]*\\(?:$\\|\\'\\|\n\\)"
@@ -513,7 +509,7 @@ Handles #+begin_src lang ... #+end_src and #+begin_example ... #+end_example."
                        (jira-block (format "{noformat}\n%s\n{noformat}" content)))
                   (go-jira-markup--org-protect-block jira-block)))
               text))
-  
+
   text)
 
 (defun go-jira-markup--org-convert-headings (text)
@@ -541,7 +537,7 @@ Handles numbered, bulleted, and nested lists."
                (level (1+ (/ (length indent) 2)))
                (jira-prefix (make-string level ?#)))
           (push (format "%s %s" jira-prefix content) result)))
-       
+
        ;; Bulleted list with optional indentation: "  - " or "    - " → "**" or "***"
        ((string-match "^\\([ \t]*\\)[-+] \\(.+\\)$" line)
         (let* ((indent (match-string 1 line))
@@ -549,7 +545,7 @@ Handles numbered, bulleted, and nested lists."
                (level (1+ (/ (length indent) 2)))
                (jira-prefix (make-string level ?*)))
           (push (format "%s %s" jira-prefix content) result)))
-       
+
        ;; Checkbox items: "- [ ] " or "- [X] " → "* " or "* " (Jira doesn't have native checkboxes)
        ((string-match "^\\([ \t]*\\)[-+] \\[[ Xx]\\] \\(.+\\)$" line)
         (let* ((indent (match-string 1 line))
@@ -557,11 +553,11 @@ Handles numbered, bulleted, and nested lists."
                (level (1+ (/ (length indent) 2)))
                (jira-prefix (make-string level ?*)))
           (push (format "%s %s" jira-prefix content) result)))
-       
+
        ;; Non-list content
        (t
         (push line result))))
-    
+
     (mapconcat #'identity (nreverse result) "\n")))
 
 (defun go-jira-markup--org-convert-inline-formatting (text)
@@ -571,7 +567,7 @@ Handles bold, italic, monospace, underline, strikethrough, etc."
   (setq text (replace-regexp-in-string
               "\\(?:^\\|[[:space:]]\\)\\(~\\([^~\n]+\\)~\\)\\(?:[[:space:]]\\|$\\)"
               (lambda (match)
-                (let* ((full (match-string 1 match))
+                (let* ((_full (match-string 1 match))
                        (content (match-string 2 match))
                        ;; Preserve surrounding whitespace
                        (before (if (string-prefix-p " " match) " " ""))
@@ -580,17 +576,17 @@ Handles bold, italic, monospace, underline, strikethrough, etc."
                           (go-jira-markup--org-protect-block (format "{{%s}}" content))
                           after)))
               text))
-  
+
   ;; Bold: *text* → *text* (already correct, but need to handle edge cases)
   ;; Org uses *bold* but we need to be careful not to match list items
   (setq text (replace-regexp-in-string
               "\\(^\\|[[:space:]]\\)\\*\\([^*\n[:space:]][^*\n]*?[^*\n[:space:]]\\)\\*\\([[:space:]]\\|[[:punct:]]\\|$\\)"
               "\\1*\\2*\\3"
               text))
-  
+
   ;; IMPORTANT: Handle underline BEFORE italic to avoid conflicts
   ;; Both use _ in their respective formats, so we need to be careful about order
-  
+
   ;; Strikethrough: +text+ → -text- (do this first since + is used in result)
   (setq text (replace-regexp-in-string
               "\\(^\\|[[:space:]]\\)\\+\\([^+\n]+\\)\\+\\([[:space:]]\\|[[:punct:]]\\|$\\)"
@@ -602,7 +598,7 @@ Handles bold, italic, monospace, underline, strikethrough, etc."
                           (go-jira-markup--org-protect-block (format "-%s-" content))
                           after)))
               text))
-  
+
   ;; Underline: _text_ → +text+ (do this next, protect result)
   (setq text (replace-regexp-in-string
               "\\(^\\|[[:space:]]\\)_\\([^_\n]+\\)_\\([[:space:]]\\|[[:punct:]]\\|$\\)"
@@ -614,13 +610,13 @@ Handles bold, italic, monospace, underline, strikethrough, etc."
                           (go-jira-markup--org-protect-block (format "+%s+" content))
                           after)))
               text))
-  
+
   ;; Italic: /text/ → _text_ (do this last since it produces _)
   (setq text (replace-regexp-in-string
               "\\(^\\|[[:space:]]\\)/\\([^/\n]+\\)/\\([[:space:]]\\|[[:punct:]]\\|$\\)"
               "\\1_\\2_\\3"
               text))
-  
+
   text)
 
 (defun go-jira-markup--org-convert-links (text)
@@ -631,13 +627,13 @@ Handles [[url][text]] → [text|url] and [[url]] → [url]."
               "\\[\\[\\([^]]+\\)\\]\\[\\([^]]+\\)\\]\\]"
               "[\\2|\\1]"
               text))
-  
+
   ;; Links without description: [[url]] → [url]
   (setq text (replace-regexp-in-string
               "\\[\\[\\([^]]+\\)\\]\\]"
               "[\\1]"
               text))
-  
+
   text)
 
 ;;;###autoload
@@ -649,20 +645,24 @@ Returns the converted text as a string."
     (let ((text org-text))
       ;; Phase 1: Protect and convert code blocks
       (setq text (go-jira-markup--org-convert-code-blocks text))
-      
+
       ;; Phase 2: Block-level conversions
       (setq text (go-jira-markup--org-convert-headings text))
       (setq text (go-jira-markup--org-convert-lists text))
-      
+
       ;; Phase 3: Inline conversions
       (setq text (go-jira-markup--org-convert-inline-formatting text))
       (setq text (go-jira-markup--org-convert-links text))
-      
+
       ;; Phase 4: Restore protected blocks
       (setq text (go-jira-markup--org-restore-blocks text))
-      
+
       ;; Trim trailing whitespace
       (string-trim text))))
 
 (provide 'go-jira-markup)
 ;;; go-jira-markup.el ends here
+
+;; Local Variables:
+;; package-lint-main-file: "go-jira.el"
+;; End:

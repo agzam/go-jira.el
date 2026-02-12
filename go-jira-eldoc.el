@@ -6,6 +6,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
+;; URL: https://github.com/agzam/go-jira.el
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is not part of GNU Emacs.
@@ -321,3 +322,7 @@ In terminal or without posframe, eldoc provides fallback."
 
 (provide 'go-jira-eldoc)
 ;;; go-jira-eldoc.el ends here
+
+;; Local Variables:
+;; package-lint-main-file: "go-jira.el"
+;; End:

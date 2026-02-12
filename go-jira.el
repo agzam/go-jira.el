@@ -13,13 +13,12 @@
 
 ;;; Commentary:
 
-;; This package provides an Emacs interface to the go-jira CLI tool
-;; (https://github.com/go-jira/jira), allowing you to interact with
-;; Jira issues directly from Emacs.
+;; interface to the go-jira CLI tool (https://github.com/go-jira/jira)
 ;;
 ;; Features:
 ;; - Search and browse Jira issues
 ;; - View issue details
+;; - Edit title, description, comments
 ;; - Convert issue keys to org-mode/markdown links
 ;; - Generate git branch names from issues
 ;; - Integration with consult for fuzzy searching
@@ -32,8 +31,8 @@
 (require 'ansi-color)
 (require 'markdown-mode)
 (require 's)
-(require 'go-jira-comment)
-(require 'go-jira-description)
+
+(require 'go-jira-edit)
 
 (defgroup go-jira nil
   "Emacs interface to go-jira CLI tool."
@@ -127,7 +126,7 @@ Returns a plist with :ticket, :url, and :summary."
 
 ;;;###autoload
 (defun go-jira-ticket->link (&optional ticket-arg)
-  "Convert the TICKET-ARG number at point to 'org-mode' link."
+  "Convert the TICKET-ARG number at point to `org-mode' link."
   (interactive)
   (let* ((ticket (go-jira--ticket-arg-or-ticket-at-point ticket-arg))
          (sum+url (go-jira--summary+url ticket))
@@ -210,30 +209,24 @@ becomes SAC-28812__add_new_metadata_tap-asana"
 
 (defvar go-jira-view-mode-map
   (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c M-e") #'go-jira-edit)
+    (define-key map (kbd "C-c C-y") #'go-jira-view-mode-copy-url)
     (define-key map (kbd "C-c C-o") #'go-jira-view-mode-open-browser)
-    (define-key map (kbd "C-c C-u") #'go-jira-view-mode-copy-url)
-    (define-key map (kbd "r") #'go-jira-view-mode-refresh)
-    (define-key map (kbd "C") #'go-jira-add-comment)
-    (define-key map (kbd "E") #'go-jira-edit-description)
-    (define-key map (kbd "q") #'kill-buffer-and-window)
+    (define-key map (kbd "C-c M-r") #'go-jira-view-mode-refresh)
+    (define-key map (kbd "C-c M-q") #'kill-buffer-and-window)
     map)
   "Keymap for `go-jira-view-mode'.")
 
 (define-derived-mode go-jira-view-mode org-mode "Jira-View"
-  "Major mode for viewing Jira tickets in 'org-mode' format.
+  "Major mode for viewing Jira tickets in `org-mode' format.
 \\{go-jira-view-mode-map}"
   :group 'go-jira
-  (require 'go-jira-description)
+  (require 'go-jira-edit)
   (setq-local buffer-read-only t)
   
   ;; Add font-lock for Jira headings
   (font-lock-add-keywords nil
-   '((go-jira--fontify-jira-headings)))
-  
-  ;; Add hook for description editing
-  (add-hook 'read-only-mode-hook #'go-jira-description--read-only-change-hook nil t)
-  
-  (message "Jira ticket view loaded"))
+   '((go-jira--fontify-jira-headings))))
 
 (defun go-jira-view-mode-open-browser ()
   "Open ticket in browser from jira view mode."
@@ -303,16 +296,28 @@ becomes SAC-28812__add_new_metadata_tap-asana"
               (dolist (comment (reverse comments))
                 (let* ((author (gethash 'author comment))
                        (author-name (when author (gethash 'displayName author)))
+                       (author-id (when author (gethash 'accountId author)))
                        (created (gethash 'created comment))
-                       (body (gethash 'body comment)))
+                       (body (gethash 'body comment))
+                       (comment-id (gethash 'id comment)))
                   (when body
-                    (let ((timestamp (when created
-                                       (condition-case nil
-                                           (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
-                                         (error created)))))
+                    (let* ((timestamp (when created
+                                        (condition-case nil
+                                            (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
+                                          (error created))))
+                           ;; Create comment link if we have the comment ID
+                           (timestamp-link (if comment-id
+                                               (let ((base-url (go-jira-ticket->url key)))
+                                                 (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
+                                                         base-url comment-id comment-id timestamp))
+                                             timestamp))
+                           (heading-start (point)))
                       (insert (format "*** %s - %s\n"
                                       (or author-name "Unknown")
-                                      (or timestamp created "")))
+                                      (or timestamp-link timestamp "")))
+                      ;; Store author ID as text property on the heading
+                      (when author-id
+                        (put-text-property heading-start (point) 'jira-comment-author author-id))
                       ;; Only convert if body has markup
                       (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
                           (insert (go-jira-markup-to-org body))

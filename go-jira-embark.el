@@ -6,6 +6,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (embark "0.20") (org "9.8"))
 ;; Keywords: tools, jira
+;; URL: https://github.com/agzam/go-jira.el
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is not part of GNU Emacs.
@@ -31,3 +32,7 @@
 
 (provide 'go-jira-embark)
 ;;; go-jira-embark.el ends here
+
+;; Local Variables:
+;; package-lint-main-file: "go-jira.el"
+;; End:
