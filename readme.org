@@ -5,7 +5,7 @@
 Because Jira UI sucks and I just can't stand it. It's a useless time wasting mental black hole that bombards my brain neurons with useless crap and I don't have time and patience to deal with it. Unfortunately, I have to use it for work.
 
 * What ...
-This is an Emacs package that works with Jira while delegating the part of auth/fetching data to [[https://github.com/go-jira/jira][go-jira]] CLI tool - hence the name.
+This is an Emacs package that works with Jira while delegating the part of auth/fetching data to [[https://github.com/go-jira/jira][go-jira]] CLI tool - hence the name. It's never meant to fully replace Jira's web interface, yet certainly helps to reduce the frustration for some common operations - searching, browsing and basic editing.
 
 
 * How ...
@@ -28,24 +28,45 @@ It depends on the type of Jira instance you're trying to access. The package doe
 
 * Features:
 
-- ~go-jira-view-ticket~ - Main buffer for ticket overview. Shows the ticket description, subtasks, linked items and comments. You can edit title, description, your comments and add new ones.
+** ~go-jira-view-ticket~ - Main buffer for ticket overview. Shows the ticket description, subtasks, linked items and comments. You can edit title, description, your comments and add new ones.
 
-    | <C-c M-e> | go-jira-edit                   |
-    | <C-C M-y> | go-jira-view-mode-copy-url     |
-    | <C-c C-o> | go-jira-view-mode-open-browser |
-    | <C-c M-r> | go-jira-view-mode-refresh      |
-    | <C-c M-q> | kill-buffer-and-window         |
+| Key     | Command                        | Description                         |
+|---------+--------------------------------+-------------------------------------|
+| C-c M-e | go-jira-edit                   | Edit title, description or comments |
+| C-C C-y | go-jira-view-mode-copy-url     | Copy ticket url                     |
+| C-c C-o | go-jira-view-mode-open-browser | Open ticket in the browser          |
+| C-c M-r | go-jira-view-mode-refresh      | Pull ticket data from Jira          |
+| C-c M-q | kill-buffer-and-window         |                                     |
 
-- ~go-jira-display-board~ - Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline with titles, upon expanding it will load individual ticket info. Editing works the same way as in view-ticket buffer.
+** ~go-jira-display-board~ - Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline with titles, upon expanding it will load individual ticket info. Editing works the same way as in view-ticket buffer.
   
-- ~go-jira-browse-default-board~ - most of the time you'd want to quickly jump to one specific board. When you run the command for the first time, it would prompt you to pick a board from the list and sets the ~go-jira-default-board-id~. You can set it manually:
-
-  1. Open your board: =M-x go-jira-browse-boards= → select “SAC Pipeline (Pod 2)”
-  2. In that buffer, evaluate: =M-: go-jira--board-data RET=
-  3. Look for =:id 3018= (or whatever number) in the output
+| Key     | Command                           | Description                                                |
+|---------+-----------------------------------+------------------------------------------------------------|
+| RET     | go-jira-board-view-issue          | View ticket at point in a separate buffer                  |
+| C-c M-e | go-jira-edit                      | Edit title, description or comments of the ticket at point |
+| C-c C-y | go-jira-board-view-copy-issue-url | Copy url of the ticket at point                            |
+| C-c C-o | go-jira-board-browse-issue-url    | Open ticket at point in the browser                        |
+| C-c M-o | go-jira-board-view-open-browser   | Open board URL in browser                                  |
+| C-c M-y | go-jira-board-view-copy-url       | Copy board URL                                             |
+| C-c M-r | go-jira-board-refresh             | Pull board data from Jira                                  |
+| C-c M-q | quit-window                       |                                                            |
   
-- ~go-jira-popup-mode~ - shows description of a ticket when cursor is at point of a text matching Jira ticket number
 
-  - in TUI, instead of the popup there's an option - ~go-jira-eldoc-mode~
-     
-- Embark integration - adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.
+** ~go-jira-browse-default-board~ - most of the time you'd want to quickly jump to one specific board. When you run the command for the first time, it would prompt you to pick a board from the list and sets the ~go-jira-default-board-id~. You can set it manually:
+
+1. Open your board: =M-x go-jira-browse-boards= → select “SAC Pipeline (Pod 2)”
+2. In that buffer, evaluate: =M-: go-jira--board-data RET=
+3. Look for =:id 3018= (or whatever number) in the output
+
+** ~go-jira-search~ - Consult interface for searching - takes a JQL and sends the request. Typically, you'd want not a global but only narrowed search within specific projects, assignees, ticket conditions, etc. You can set ~go-jira-default-search-format-string~ and it will be used as the default template, e.g.,
+
+#+begin_src emacs-lisp
+(setopt go-jira-default-search-format-string
+        "project = PROJ1 AND status NOT IN (Closed, Done) AND text ~ \"%s\"")
+#+end_src  
+  
+** ~go-jira-popup-mode~ - shows description of a ticket when cursor is at point of a text matching Jira ticket number
+
+- in TUI, instead of the popup there's an option - ~go-jira-eldoc-mode~
+
+** Embark integration - adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.

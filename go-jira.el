@@ -71,6 +71,17 @@ Falls back to last kill in `kill-ring' if it's a valid ticket."
                                  last-kill)))))
     (or ticket ticket-at-point kill-ring-ticket)))
 
+(defun go-jira--base-url ()
+  "Get the Jira instance base URL.
+Uses the serverInfo REST endpoint to determine the base URL."
+  (let* ((j (go-jira--find-exe))
+         (jq (go-jira--find-exe "jq"))
+         (cmd (format "%s request '/rest/api/2/serverInfo' --method GET | %s -r '.baseUrl'" j jq))
+         (result (string-trim (shell-command-to-string cmd))))
+    (if (or (string-empty-p result) (string-match-p "error" result))
+        (error "Failed to get Jira base URL")
+      result)))
+
 (defun go-jira--url (ticket)
   "Get the browsable URL for TICKET."
   (let* ((j (go-jira--find-exe))

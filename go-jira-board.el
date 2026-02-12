@@ -371,6 +371,9 @@ Returns an alist of (column-name . (issue-list))."
     (define-key map (kbd "RET") #'go-jira-board-view-issue)
     (define-key map (kbd "C-c M-e") #'go-jira-edit)
     (define-key map (kbd "C-c C-o") #'go-jira-board-browse-issue-url)
+    (define-key map (kbd "C-c C-y") #'go-jira-board-view-copy-issue-url)
+    (define-key map (kbd "C-c M-o") #'go-jira-board-view-open-browser)
+    (define-key map (kbd "C-c M-y") #'go-jira-board-view-copy-url)
     (define-key map (kbd "C-c M-r") #'go-jira-board-refresh)
     (define-key map (kbd "C-c M-q") #'quit-window)
     map)
@@ -553,6 +556,41 @@ will have BASE-LEVEL asterisks added to it."
   (when-let* ((props (org-entry-properties))
               (key (cdr (assoc "ISSUE_KEY" props))))
     (browse-url (go-jira-ticket->url key))))
+
+(defun go-jira-board-view--issue-key-at-point ()
+  "Return the ISSUE_KEY property for the entry at point, or nil."
+  (when-let* ((props (org-entry-properties))
+              (key (cdr (assoc "ISSUE_KEY" props))))
+    key))
+
+(defun go-jira-board-view-copy-issue-url ()
+  "Copy URL for the Jira issue at point."
+  (interactive)
+  (if-let ((key (go-jira-board-view--issue-key-at-point)))
+      (progn
+        (kill-new (go-jira-ticket->url key))
+        (message "Copied URL for %s" key))
+    (user-error "No issue at point")))
+
+(defun go-jira-board-view--board-url ()
+  "Return the browsable URL for the current board."
+  (if-let ((board-data (buffer-local-value 'go-jira--board-data (current-buffer))))
+      (let ((board-id (plist-get board-data :id)))
+        (format "%s/secure/RapidBoard.jspa?rapidView=%d"
+                (go-jira--base-url) board-id))
+    (user-error "No board data found in current buffer")))
+
+(defun go-jira-board-view-open-browser ()
+  "Open the current board in browser."
+  (interactive)
+  (browse-url (go-jira-board-view--board-url)))
+
+(defun go-jira-board-view-copy-url ()
+  "Copy URL for the current board."
+  (interactive)
+  (let ((url (go-jira-board-view--board-url)))
+    (kill-new url)
+    (message "Copied board URL: %s" url)))
 
 (defun go-jira-board-refresh ()
   "Refresh the current board view."
