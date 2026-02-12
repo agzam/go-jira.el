@@ -24,10 +24,12 @@ deps:
 	@echo "Installing dependencies"
 	emacs --batch --eval "$$DEPS_SCRIPT"
 
+TEST_FILES := $(filter-out test/go-jira-e2e-test.el, $(wildcard test/*.el))
+
 test:
-	emacs --batch --funcall package-initialize --directory test \
-	--eval '(add-to-list '\''load-path ".")' \
-	--funcall buttercup-run-discover
+	emacs --batch --funcall package-initialize -L . -L test \
+	$(foreach f,$(TEST_FILES),-l $(notdir $(f))) \
+	--funcall buttercup-run
 
 e2e:
 	emacs -Q --batch -L . -l test/go-jira-e2e-test.el
