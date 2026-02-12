@@ -373,6 +373,107 @@ Changed list:
             (e2e-check "2nd round-trip stable" (string= (string-trim new-jira) (string-trim jira-ed)))))))))
 
 ;; ===================================================================
+;; PHASE 5 — COMPACT CODE BLOCKS (SAC-30260 pattern)
+;; ===================================================================
+;; Real Jira tickets sometimes have code blocks with NO newline between
+;; the tag and content: {code:json}{"key":"val"}{code}.
+;; This is the exact pattern from SAC-30260 that broke viewing.
+;; Push it as a comment, fetch, round-trip, verify nothing is garbled.
+
+(princ "\n── PHASE 5: Compact Code Blocks (no newlines) ──\n\n")
+
+(let* ((compact-comment
+        (concat "Compact code blocks from SAC-30260:\n\n"
+                ;; JSON with no newlines around tags
+                "{code:json}{\"completionState\": \"FAILED\", \"exitCode\": 1}{code}\n\n"
+                "Normal paragraph between blocks.\n\n"
+                ;; Python with no newline after opener
+                "{code:python}def my_func(exit_status):\n    return exit_status{code}\n\n"
+                ;; Plain {code} with no newlines
+                "{code}plain block no lang{code}\n\n"
+                ;; Normal code block (with newlines) to make sure we don't break those
+                "{code:bash}\necho \"normal_block\"\n{code}\n\n"
+                "End of test with my_variable.")))
+
+  (princ "5a) Add comment with compact code blocks\n")
+  (unless (e2e-add-comment compact-comment)
+    (error "FATAL: could not add compact code block comment"))
+  (sleep-for 2)
+
+  (princ "5b) Fetch & verify raw content\n\n")
+  (let* ((data (e2e-fetch))
+         (comments (plist-get data :comments))
+         (c (car (last comments)))
+         (c-id (plist-get c :id))
+         (c-body (plist-get c :body)))
+
+    (push c-id e2e-comment-ids)
+    (princ (format "    Comment ID: %s  (%d chars)\n\n" c-id (length c-body)))
+
+    (princ "[Raw content present]\n")
+    (e2e-check "completionState" (string-match-p "completionState" c-body))
+    (e2e-check "exitCode" (string-match-p "exitCode" c-body))
+    (e2e-check "my_func" (string-match-p "my_func" c-body))
+    (e2e-check "exit_status" (string-match-p "exit_status" c-body))
+    (e2e-check "plain block" (string-match-p "plain block" c-body))
+    (e2e-check "normal_block" (string-match-p "normal_block" c-body))
+    (e2e-check "my_variable" (string-match-p "my_variable" c-body))
+
+    ;; Round-trip through Org and back
+    (princ "\n5c) Jira→Org→Jira round-trip\n")
+    (let* ((org-text  (go-jira-markup-to-org c-body))
+           (jira-text (go-jira-markup-from-org org-text)))
+
+      (princ "\n[Org intermediate - sanity]\n")
+      (e2e-check "org has begin_src" (string-match-p "#\\+begin_src" org-text))
+      (e2e-check "org has completionState" (string-match-p "completionState" org-text))
+      (e2e-check "org has my_func" (string-match-p "my_func" org-text))
+      (e2e-check "org has no {code" (not (string-match-p "{code" org-text)))
+
+      (princ "\n[Round-tripped Jira content]\n")
+      (e2e-check "completionState" (string-match-p "completionState" jira-text))
+      (e2e-check "exitCode" (string-match-p "exitCode" jira-text))
+      (e2e-check "my_func" (string-match-p "my_func" jira-text))
+      (e2e-check "exit_status" (string-match-p "exit_status" jira-text))
+      (e2e-check "plain block" (string-match-p "plain block" jira-text))
+      (e2e-check "normal_block" (string-match-p "normal_block" jira-text))
+      (e2e-check "my_variable" (string-match-p "my_variable" jira-text))
+      (e2e-check "no NOLANG" (not (string-match-p "NOLANG" jira-text)))
+      (e2e-check "no {~}" (not (string-match-p "{~}" jira-text)))
+      (e2e-check "no \\\\n" (not (string-match-p "\\\\n" jira-text)))
+      (e2e-check "no garbled {code" (not (string-match-p "{code:NOLANG}" jira-text)))
+      (e2e-check "has {code:json}" (string-match-p "{code:json}" jira-text))
+      (e2e-check "has {code:python}" (string-match-p "{code:python}" jira-text))
+      (e2e-check "has {code:bash}" (string-match-p "{code:bash}" jira-text))
+
+      ;; Push the round-tripped content back and verify it survives
+      (princ "\n5d) Submit round-tripped content\n")
+      (unless (e2e-edit-comment c-id jira-text)
+        (error "FATAL: could not submit round-tripped compact code block comment"))
+      (sleep-for 2)
+
+      (princ "5e) Fetch final & verify\n\n")
+      (let* ((data2 (e2e-fetch))
+             (comments2 (plist-get data2 :comments))
+             (c-final (cl-find-if (lambda (c) (string= (plist-get c :id) c-id)) comments2))
+             (c-final-body (plist-get c-final :body)))
+
+        (princ "[Final content after push+fetch]\n")
+        (e2e-check "completionState" (string-match-p "completionState" c-final-body))
+        (e2e-check "my_func" (string-match-p "my_func" c-final-body))
+        (e2e-check "exit_status" (string-match-p "exit_status" c-final-body))
+        (e2e-check "plain block" (string-match-p "plain block" c-final-body))
+        (e2e-check "normal_block" (string-match-p "normal_block" c-final-body))
+        (e2e-check "my_variable" (string-match-p "my_variable" c-final-body))
+        (e2e-check "no NOLANG" (not (string-match-p "NOLANG" c-final-body)))
+        (e2e-check "no {~}" (not (string-match-p "{~}" c-final-body)))
+
+        (princ "\n[Idempotency]\n")
+        (let* ((org2  (go-jira-markup-to-org c-final-body))
+               (jira2 (go-jira-markup-from-org org2)))
+          (e2e-check "2nd round-trip stable" (string= (string-trim jira-text) (string-trim jira2))))))))
+
+;; ===================================================================
 ;; RESULT
 ;; ===================================================================
 (princ (format "\n══════════════════════════════════════════\n"))

@@ -95,8 +95,70 @@ Protects elements that Pandoc handles incorrectly:
 - Subscript: ~text~ (Pandoc breaks the round-trip)
 - Citation: ??text?? (Pandoc converts to em-dash, lossy)
 - Color: {color:X}text{color} (Pandoc strips entirely)
-- Code blocks without language: {code}...{code} (Pandoc guesses java)"
+- Code blocks without language: {code}...{code} (Pandoc guesses java)
+- Code blocks with missing newlines: {code:X}content{code} (Pandoc needs newlines)"
   (setq go-jira-markup--placeholders nil)
+
+  ;; FIRST: Normalize code blocks and mark NOLANG in one pass.
+  ;; Jira allows {code:lang}content{code} on same line or without trailing newline.
+  ;; Pandoc requires {code:lang}\ncontent\n{code} to parse correctly.
+  ;; Also, {code} without language needs marking as {code:NOLANG} so Pandoc
+  ;; doesn't guess "java".
+  ;;
+  ;; Strategy: Walk through ALL {code...} tags, pair openers with closers.
+  ;; - At depth 0: {code:LANG} or {code} is an opener
+  ;; - At depth 1: {code} is a closer
+  ;; - Skip {{code}} (Jira inline code) by checking for preceding {
+  ;; For each opener-closer pair, ensure \n after opener and \n before closer.
+  ;; For openers without language, replace with {code:NOLANG}.
+  (let ((result "")
+        (consumed 0)         ; how far we've appended to result
+        (search-from 0)      ; where to search for next {code} tag
+        (in-block nil)       ; nil when outside code block, non-nil inside
+        (opener-start nil)   ; start pos of current opener tag in text
+        (opener-end nil)     ; end pos of current opener tag in text
+        (opener-tag nil))    ; the opener tag text (possibly rewritten)
+    (while (string-match "{code\\(\\(?::[^}]*\\)?\\)}" text search-from)
+      (let* ((tag-start (match-beginning 0))
+             (tag-end (match-end 0))
+             (lang-part (match-string 1 text)) ; "" for {code}, ":python" for {code:python}
+             ;; Check if preceded by { (inline {{code}})
+             (is-inline (and (> tag-start 0)
+                             (eq (aref text (1- tag-start)) ?{))))
+        (if is-inline
+            ;; Skip inline {{code}} markup — pass through as-is
+            (progn
+              (setq result (concat result (substring text consumed tag-end)))
+              (setq consumed tag-end)
+              (setq search-from tag-end))
+          (if (not in-block)
+              ;; At depth 0: this is an opener — record position,
+              ;; advance search but not consumed (text before opener
+              ;; gets appended when the closer is found)
+              (progn
+                (setq opener-start tag-start)
+                (setq opener-end tag-end)
+                (setq opener-tag (if (string-empty-p lang-part)
+                                     "{code:NOLANG}"
+                                   (substring text tag-start tag-end)))
+                (setq in-block t)
+                (setq search-from tag-end))
+            ;; At depth 1: this is a closer
+            (let ((content (substring text opener-end tag-start)))
+              ;; Ensure newline after opener
+              (unless (string-prefix-p "\n" content)
+                (setq content (concat "\n" content)))
+              ;; Ensure newline before closer
+              (unless (string-suffix-p "\n" content)
+                (setq content (concat content "\n")))
+              ;; Append: text before opener + normalized block
+              (setq result (concat result
+                                   (substring text consumed opener-start)
+                                   opener-tag content "{code}"))
+              (setq consumed tag-end)
+              (setq search-from tag-end)
+              (setq in-block nil))))))
+    (setq text (concat result (substring text consumed))))
 
   ;; Protect superscript: ^text^ → placeholder
   ;; Must not match ^{text} in code blocks (already handled by pandoc)
@@ -134,15 +196,6 @@ Protects elements that Pandoc handles incorrectly:
                       (content (match-string 2 match)))
                   (go-jira-markup--placeholder
                    "COLOR" (format "{color:%s}%s{color}" color content))))
-              text))
-
-  ;; Protect opening {code} without language (Pandoc guesses java)
-  ;; Only match opening {code} blocks, not closing ones.
-  ;; Opening {code} is followed by content; closing {code} is preceded by content.
-  ;; Strategy: match {code}\n...{code} blocks and replace only the opener.
-  (setq text (replace-regexp-in-string
-              "{code}\\([\n]\\(?:.\\|\n\\)*?\\){code}"
-              "{code:NOLANG}\\1{code}"
               text))
 
   text)

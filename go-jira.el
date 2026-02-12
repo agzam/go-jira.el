@@ -275,7 +275,15 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                (summary (when fields (gethash 'summary fields)))
                (description (when fields (gethash 'description fields)))
                (comment-data (when fields (gethash 'comment fields)))
-               (comments (when comment-data (gethash 'comments comment-data))))
+               (comments (when comment-data (gethash 'comments comment-data)))
+               ;; Build browse URL from `self' — avoids extra API calls.
+               ;; self looks like "https://host/rest/api/2/issue/12345"
+               (self-url (gethash 'self parsed))
+               (base-url (when self-url
+                           (if (string-match "\\(.*\\)/rest/" self-url)
+                               (format "%s/browse/%s" (match-string 1 self-url) key)
+                             ;; Fallback: fetch via API (single call, not per-comment)
+                             (go-jira-ticket->url key)))))
           (with-current-buffer buf
             (setq-local buffer-read-only nil)
             (erase-buffer)
@@ -308,10 +316,9 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                                             (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
                                           (error created))))
                            ;; Create comment link if we have the comment ID
-                           (timestamp-link (if comment-id
-                                               (let ((base-url (go-jira-ticket->url key)))
-                                                 (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
-                                                         base-url comment-id comment-id timestamp))
+                           (timestamp-link (if (and comment-id base-url)
+                                               (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
+                                                       base-url comment-id comment-id timestamp)
                                              timestamp))
                            (heading-start (point)))
                       (insert (format "*** %s - %s\n"

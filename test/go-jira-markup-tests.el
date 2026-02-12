@@ -569,6 +569,140 @@
         ;; Should match original (normalized)
         (expect (string-trim jira-again) :to-equal (string-trim jira-text))))))
 
+(describe "Compact code blocks (no newlines between tags and content)"
+
+  (describe "SAC-30260 pattern: {code:lang}content{code}"
+
+    (it "normalizes JSON crammed on one line"
+      (let* ((input "{code:json}{\"key\": \"value\"}{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect org :to-match "#\\+begin_src json")
+        (expect org :to-match "\"key\"")
+        (expect (string-trim back) :to-match "{code:json}")
+        (expect back :to-match "\"key\"")))
+
+    (it "normalizes Python with no newline after opener"
+      (let* ((input "{code:python}def my_func():\n    return True{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect org :to-match "#\\+begin_src python")
+        (expect org :to-match "my_func")
+        (expect back :to-match "{code:python}")
+        (expect back :to-match "my_func")))
+
+    (it "normalizes {code} without language crammed on one line"
+      (let* ((input "{code}plain block no lang{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect org :to-match "#\\+begin_src")
+        (expect org :to-match "plain block")
+        (expect back :not :to-match "NOLANG")
+        (expect back :to-match "plain block")))
+
+    (it "does not break blocks that already have newlines"
+      (let* ((input "{code:bash}\necho hello\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect (string-trim back) :to-equal (string-trim input)))))
+
+  (describe "Mixed compact and normal blocks in one document"
+
+    (it "handles compact + normal + compact in sequence"
+      (let* ((input "Text before.\n\n{code:json}{\"a\": 1}{code}\n\nMiddle text.\n\n{code:python}\ndef normal():\n    pass\n{code}\n\n{code:bash}echo compact{code}\n\nEnd.")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "\"a\"")
+        (expect back :to-match "normal")
+        (expect back :to-match "compact")
+        (expect back :to-match "Text before")
+        (expect back :to-match "End")))
+
+    (it "round-trips multiple compact blocks idempotently"
+      (let* ((input "{code:json}{\"x\": 1}{code}\n\n{code:python}def f(): pass{code}\n\n{code}no lang{code}")
+             (org1 (go-jira-markup-to-org input))
+             (jira1 (go-jira-markup-from-org org1))
+             (org2 (go-jira-markup-to-org jira1))
+             (jira2 (go-jira-markup-from-org org2)))
+        (expect (string-trim jira2) :to-equal (string-trim jira1))
+        (expect jira1 :not :to-match "NOLANG")))))
+
+(describe "Code blocks: inline {{code}} mixed with block {code}"
+
+  (it "does not corrupt inline {{code}} when block code follows"
+    (let* ((input "Use {{my_func()}} for this.\n\n{code:python}\ndef my_func():\n    return 1\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-match "{{my_func()}}")
+      (expect back :to-match "{code:python}")
+      (expect back :to-match "def my_func")))
+
+  (it "preserves inline {{code}} adjacent to text"
+    (let* ((input "Call {{run_task()}} then {{check_status()}} for results.")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-match "{{run_task()}}")
+      (expect back :to-match "{{check_status()}}")))
+
+  (it "handles document with only inline {{code}} and no block code"
+    (let* ((input "Use {{foo_bar}} and {{baz_qux}} in your config.")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-match "foo_bar")
+      (expect back :to-match "baz_qux"))))
+
+(describe "Code blocks: back-to-back and consecutive"
+
+  (it "handles two code blocks separated by single newline"
+    (let* ((input "{code:python}\nfoo\n{code}\n{code:bash}\nbar\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect (string-trim back) :to-equal (string-trim input))))
+
+  (it "handles three consecutive code blocks"
+    (let* ((input "{code:python}\na\n{code}\n\n{code:bash}\nb\n{code}\n\n{code:json}\n{}\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-match "{code:python}")
+      (expect back :to-match "{code:bash}")
+      (expect back :to-match "{code:json}")))
+
+  (it "handles NOLANG block between two language blocks"
+    (let* ((input "{code:python}\nfoo\n{code}\n\n{code}\nplain\n{code}\n\n{code:bash}\nbar\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-match "{code:python}")
+      (expect back :to-match "{code:bash}")
+      (expect back :not :to-match "NOLANG")
+      ;; The plain block should be {code}...{code}
+      (expect back :to-match "plain"))))
+
+(describe "Code blocks: special characters in content preserved"
+
+  (it "preserves underscores inside code blocks"
+    (let* ((input "{code:python}\nexit_status = get_value()\nmy_var = another_func()\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect (string-trim back) :to-equal (string-trim input))))
+
+  (it "preserves caret inside code blocks (not superscript)"
+    (let* ((input "{code:python}\nresult = x^2\nflags = a ^ b\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect (string-trim back) :to-equal (string-trim input))))
+
+  (it "preserves tilde inside code blocks (not subscript)"
+    (let* ((input "{code:bash}\ncd ~/projects\nfind . -name \"*.tmp\" ~ -delete\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect back :to-match "~/projects")))
+
+  (it "preserves {color:red} as literal text inside code blocks"
+    (let* ((input "{code:xml}\n<span style=\"{color:red}\">test</span>\n{code}")
+           (org (go-jira-markup-to-org input))
+           (back (go-jira-markup-from-org org)))
+      (expect (string-trim back) :to-equal (string-trim input)))))
+
 (describe "Underscores in words (variable names, file paths, identifiers)"
 
   (describe "Basic underscore preservation"
