@@ -440,6 +440,271 @@
            (jira2 (go-jira-markup-from-org org2)))
       (expect jira2 :to-equal jira1))))
 
+(describe "Code blocks with complex JSON content"
+
+  (describe "JSON with nested objects and escaped quotes"
+
+    (it "round-trips JSON code block with nested structure"
+      (let* ((input "{code:json}\n{\n  \"completionState\": \"FAILED\",\n  \"datasetStatuses\": {\n    \"48728\": {\n      \"extractionEndMode\": \"fullLoadEnd\",\n      \"completionState\": \"COMPLETED\"\n    },\n    \"48729\": {\n      \"extractionEndMode\": \"fullLoadPartial\",\n      \"completionState\": \"FAILED\"\n    }\n  }\n}\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        ;; Normalize trailing newlines that pandoc may add/remove
+        (expect (string-trim back) :to-equal (string-trim input))))
+
+    (it "preserves JSON structure through multiple round-trips"
+      (let* ((input "{code:json}\n{\n  \"test\": \"value\",\n  \"nested\": {\n    \"key\": \"data\"\n  }\n}\n{code}")
+             (org1 (go-jira-markup-to-org input))
+             (jira1 (go-jira-markup-from-org org1))
+             (org2 (go-jira-markup-to-org jira1))
+             (jira2 (go-jira-markup-from-org org2))
+             (org3 (go-jira-markup-to-org jira2))
+             (jira3 (go-jira-markup-from-org org3)))
+        ;; After multiple round-trips, output should stabilize
+        (expect (string-trim jira3) :to-equal (string-trim jira2))
+        (expect (string-trim jira2) :to-equal (string-trim jira1))))
+
+    (it "does not corrupt escaped quotes in JSON"
+      (let* ((input "{code:json}\n{\"key\": \"value with \\\"quotes\\\"\"}\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "\\\"quotes\\\\\"")))
+
+    (it "preserves newlines in JSON code blocks"
+      (let* ((input "{code:json}\n{\n  \"line1\": \"value1\",\n  \"line2\": \"value2\"\n}\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        ;; Should have real newlines, not escaped ones like \n or \\n
+        (expect (string-trim back) :to-equal (string-trim input))
+        (expect back :not :to-match "\\\\n")  ; No double-escaped newlines
+        (expect back :not :to-match "\\\\\\\\")  ; No escaped backslashes
+        )))
+
+  (describe "Code blocks without language (NOLANG marker handling)"
+
+    (it "removes NOLANG marker from final output"
+      (let* ((input "{code}\nplain code\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        ;; NOLANG is an internal marker - should never appear in output
+        (expect back :not :to-match "NOLANG")
+        (expect (string-trim back) :to-equal (string-trim input))))
+
+    (it "handles NOLANG through multiple round-trips"
+      (let* ((input "{code}\nsome code\nmore lines\n{code}")
+             (org1 (go-jira-markup-to-org input))
+             (jira1 (go-jira-markup-from-org org1))
+             (org2 (go-jira-markup-to-org jira1))
+             (jira2 (go-jira-markup-from-org org2))
+             (org3 (go-jira-markup-to-org jira2))
+             (jira3 (go-jira-markup-from-org org3)))
+        ;; NOLANG should NEVER leak into any output
+        (expect jira1 :not :to-match "NOLANG")
+        (expect jira2 :not :to-match "NOLANG")
+        (expect jira3 :not :to-match "NOLANG")
+        ;; Output should stabilize
+        (expect (string-trim jira3) :to-equal (string-trim jira2)))))
+
+  (describe "Edge cases with special characters"
+
+    (it "handles code blocks with curly braces"
+      (let* ((input "{code:javascript}\nfunction test() { return {}; }\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "{ return {}; }")
+        (expect (string-trim back) :to-equal (string-trim input))))
+
+    (it "handles code blocks with backslashes"
+      (let* ((input "{code:bash}\necho \"path\\\\to\\\\file\"\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "path\\\\\\\\to\\\\\\\\file")
+        ;; Should not have triple or quadruple backslashes
+        (expect back :not :to-match "\\\\\\\\\\\\\\\\")))
+
+    (it "handles empty code blocks"
+      (let* ((input "{code:python}\n\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect (string-trim back) :to-match "{code:python}")
+        (expect back :not :to-match "NOLANG")))
+
+    (it "handles code blocks with only whitespace"
+      (let* ((input "{code}\n   \n\t\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :not :to-match "NOLANG"))))
+
+  (describe "Simulated edit flow with JSON encoding"
+
+    (it "survives JSON encoding and decoding"
+      (let* ((org-text "#+begin_src json\n{\n  \"test\": \"value\"\n}\n#+end_src")
+             (jira-text (go-jira-markup-from-org org-text))
+             ;; Simulate JSON encoding (what happens in go-jira-edit-submit)
+             (json-string (json-encode (list :description jira-text)))
+             ;; Simulate JSON decoding (what go-jira CLI would do)
+             (decoded (let ((json-object-type 'plist))
+                        (plist-get (json-read-from-string json-string) :description))))
+        ;; Decoded text should match original jira text
+        (expect decoded :to-equal jira-text)
+        ;; Should not have escaped newlines or backslashes
+        (expect decoded :not :to-match "\\\\n")
+        (expect decoded :not :to-match "\\\\\\\\")
+        ;; Should not have NOLANG
+        (expect decoded :not :to-match "NOLANG")))
+
+    (it "handles complex JSON through full edit cycle"
+      (let* ((org-text "#+begin_src json\n{\n  \"completionState\": \"FAILED\",\n  \"nested\": {\n    \"key\": \"value\"\n  }\n}\n#+end_src")
+             (jira-text (go-jira-markup-from-org org-text))
+             (json-string (json-encode (list :fields (list :description jira-text))))
+             (decoded (let ((json-object-type 'plist))
+                        (plist-get (plist-get (json-read-from-string json-string) :fields) :description)))
+             ;; Convert back to org (simulating next edit)
+             (org-again (go-jira-markup-to-org decoded))
+             ;; Convert to jira again
+             (jira-again (go-jira-markup-from-org org-again)))
+        ;; Should not have any corruption
+        (expect jira-again :not :to-match "\\\\n")
+        (expect jira-again :not :to-match "\\\\\\\\")
+        (expect jira-again :not :to-match "NOLANG")
+        ;; Should match original (normalized)
+        (expect (string-trim jira-again) :to-equal (string-trim jira-text))))))
+
+(describe "Underscores in words (variable names, file paths, identifiers)"
+
+  (describe "Basic underscore preservation"
+
+    (it "preserves underscores in variable names"
+      (let* ((input "Variable names: my_variable, another_var, some_function_name")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my_variable")
+        (expect back :to-match "another_var")
+        (expect back :to-match "some_function_name")
+        (expect back :not :to-match "{~}")  ; No subscript markup
+        (expect back :to-equal input)))  ; Perfect round-trip
+
+    (it "preserves underscores in file paths"
+      (let* ((input "File: /path/to/my_file.txt and another_file_name.json")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my_file")
+        (expect back :to-match "another_file_name")
+        (expect back :to-equal input)))
+
+    (it "preserves underscores in code identifiers"
+      (let* ((input "Constants: MAX_SIZE, MIN_VALUE, DEFAULT_CONFIG")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "MAX_SIZE")
+        (expect back :to-match "MIN_VALUE")
+        (expect back :to-match "DEFAULT_CONFIG")
+        (expect back :to-equal input)))
+
+    (it "handles multiple underscores in one word"
+      (let* ((input "Complex: this_is_a_long_variable_name")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "this_is_a_long_variable_name")
+        (expect back :not :to-match "{~}")
+        (expect back :to-equal input))))
+
+  (describe "Distinguishing underscores from emphasis"
+
+    (it "distinguishes between underscore words and actual emphasis"
+      (let* ((input "Variable: my_var but also _actual italic_ text")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my_var")
+        (expect back :to-match "_actual italic_")
+        (expect back :to-equal input)))
+
+    (it "distinguishes between underscore words and actual subscript"
+      (let* ((input "Variable: my_var but subscript: H~2~O")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my_var")
+        (expect back :to-match "H~2~O")
+        (expect back :to-equal input))))
+
+  (describe "Underscores in code blocks"
+
+    (it "preserves underscores in code blocks"
+      (let* ((input "{code:python}\ndef my_function(param_name):\n    result_value = process_data(param_name)\n    return result_value\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my_function")
+        (expect back :to-match "param_name")
+        (expect back :to-match "result_value")
+        (expect back :to-match "process_data")))
+
+    (it "preserves underscores in bash commands"
+      (let* ((input "{code:bash}\ncd /path/to/my_project\nnpm run build_production\n./scripts/deploy_to_staging.sh\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my_project")
+        (expect back :to-match "build_production")
+        (expect back :to-match "deploy_to_staging")))
+
+    (it "preserves underscores in SQL"
+      (let* ((input "{code:sql}\nSELECT user_id, user_name, created_at\nFROM user_table\nWHERE status_code = 'ACTIVE'\n{code}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "user_id")
+        (expect back :to-match "user_name")
+        (expect back :to-match "created_at")
+        (expect back :to-match "user_table")
+        (expect back :to-match "status_code"))))
+
+  (describe "Edge cases"
+
+    (it "handles URLs with underscores"
+      (let* ((input "Link: https://example.com/api/user_profile?param_name=value")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "user_profile")
+        (expect back :to-match "param_name")))
+
+    (it "handles email addresses with underscores"
+      (let* ((input "Contact: john_doe@example.com and jane_smith@test.org")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "john_doe")
+        (expect back :to-match "jane_smith")))
+
+    (it "handles mixed underscores and dashes"
+      (let* ((input "Variables: my-kebab-case and my_snake_case and camelCase")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my-kebab-case")
+        (expect back :to-match "my_snake_case")))
+
+
+
+    (it "handles underscores in inline code"
+      (let* ((input "Use {{my_function()}} to call {{another_func}}")
+             (org (go-jira-markup-to-org input))
+             (back (go-jira-markup-from-org org)))
+        (expect back :to-match "my_function")
+        (expect back :to-match "another_func"))))
+
+  (describe "Multiple round-trips with underscores"
+
+    (it "is idempotent with underscored variables"
+      (let* ((input "Content with my_variable and *bold* and _italic_")
+             (org1 (go-jira-markup-to-org input))
+             (jira1 (go-jira-markup-from-org org1))
+             (org2 (go-jira-markup-to-org jira1))
+             (jira2 (go-jira-markup-from-org org2))
+             (org3 (go-jira-markup-to-org jira2))
+             (jira3 (go-jira-markup-from-org org3)))
+        ;; Should stabilize immediately
+        (expect jira1 :to-equal jira2)
+        (expect jira2 :to-equal jira3)
+        ;; Should preserve content
+        (expect jira1 :to-match "my_variable")
+        (expect jira1 :to-match "\\*bold\\*")
+        (expect jira1 :to-match "_italic_")))))
+
 (describe "go-jira-markup--find-pandoc"
 
   (it "finds pandoc executable"

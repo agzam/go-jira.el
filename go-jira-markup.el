@@ -165,7 +165,8 @@ Restores placeholders to their Org equivalents."
   "Pre-process Org TEXT before Pandoc org→jira conversion.
 Protects elements that Pandoc's Org→Jira writer handles incorrectly:
 - Citation markers «text» → placeholder (to restore as ??text??)
-- Color markers from jira-pre-process → placeholder"
+- Color markers from jira-pre-process → placeholder
+- Underscores in words (to prevent pandoc treating them as subscript/emphasis)"
   (setq go-jira-markup--placeholders nil)
 
   ;; Protect citation markers: /«text»/ → placeholder
@@ -201,6 +202,36 @@ Protects elements that Pandoc's Org→Jira writer handles incorrectly:
                 (let ((content (match-string 1 match)))
                   (go-jira-markup--placeholder "SUB" (format "~%s~" content))))
               text))
+
+  ;; CRITICAL FIX: Protect underscores in words (variable names, file paths, etc.)
+  ;; Pandoc treats _text_ as subscript/emphasis, which breaks my_variable → my{~}variable{~}
+  ;; We need to protect underscores that are:
+  ;; - Surrounded by word characters (alphanumeric, not whitespace/punctuation)
+  ;; - NOT part of org emphasis markup (_text_ at word boundaries)
+  ;; - NOT in org special syntax like #+begin_src, #+end_src, etc.
+  ;;
+  ;; Strategy: Process line by line, skip lines that start with #+
+  ;; For other lines, replace words containing underscores
+  ;; This preserves actual org emphasis _like this_ while protecting my_variable
+  (setq text (mapconcat
+              (lambda (line)
+                (if (string-match-p "^[[:space:]]*#\\+" line)
+                    ;; Skip org special syntax lines (#+begin_src, #+end_src, etc.)
+                    line
+                  ;; Process normal text lines
+                  (replace-regexp-in-string
+                   ;; Match: word containing at least one underscore surrounded by alphanumerics
+                   "\\<\\([[:alnum:]_]*[[:alnum:]]\\)_\\([[:alnum:]][[:alnum:]_]*\\)\\>"
+                   (lambda (match)
+                     (let ((word (match-string 0 match)))
+                       ;; Replace ALL underscores in this word with placeholders
+                       (replace-regexp-in-string
+                        "_"
+                        (lambda (_) (go-jira-markup--placeholder "UNDERSCORE" "_"))
+                        word)))
+                   line)))
+              (split-string text "\n")  ;; Don't omit nulls - preserve empty lines
+              "\n"))
 
   text)
 

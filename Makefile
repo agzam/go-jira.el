@@ -1,4 +1,4 @@
-.PHONY: help test deps check-compile
+.PHONY: help test e2e deps check-compile
 
 define DEPS_SCRIPT
 (progn
@@ -16,6 +16,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make deps          Install dependencies"
 	@echo "  make test          Run the tests"
+	@echo "  make e2e           Run E2E tests against real Jira (local only)"
 	@echo "  make compile       Byte-compile the package"
 	@echo "  make check-compile Check for clean byte-compilation"
 
@@ -27,6 +28,9 @@ test:
 	emacs --batch --funcall package-initialize --directory test \
 	--eval '(add-to-list '\''load-path ".")' \
 	--funcall buttercup-run-discover
+
+e2e:
+	emacs -Q --batch -L . -l test/go-jira-e2e-test.el
 
 check-compile: deps
 	@echo "Checking byte-compilation..."
