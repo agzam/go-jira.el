@@ -463,5 +463,8 @@ If QUERY is not provided, uses `go-jira-default-search-format-string'."
                                           (match-string 0 cand))))
                   (go-jira-view-ticket ticket)))))))
 
+(with-eval-after-load 'embark
+  (require 'go-jira-embark))
+
 (provide 'go-jira)
 ;;; go-jira.el ends here

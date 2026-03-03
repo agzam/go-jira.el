@@ -4,7 +4,6 @@
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (embark "0.20") (org "9.8"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -17,10 +16,9 @@
 
 ;;; Code:
 
-(require 'go-jira)
+(require 'embark)
 (require 'org-macs)
 
-;;;###autoload
 (defun go-jira-embark-target-ticket-at-point ()
   "Target jira ticket at point for embark."
   (when-let* ((jira-ticket-pattern "\\b[A-Z]+-[0-9]+\\b")
@@ -29,6 +27,13 @@
               (end (cdr bounds)))
     `(jira-ticket ,(buffer-substring-no-properties beg end)
       . ,(cons beg end))))
+
+(defvar-keymap go-jira-embark-jira-ticket-map
+  :doc "Keymap for Jira ticket actions."
+  :parent embark-general-map)
+
+(add-to-list 'embark-target-finders #'go-jira-embark-target-ticket-at-point)
+(add-to-list 'embark-keymap-alist '(jira-ticket . go-jira-embark-jira-ticket-map))
 
 (provide 'go-jira-embark)
 ;;; go-jira-embark.el ends here
