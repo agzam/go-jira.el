@@ -193,6 +193,63 @@ images immediately, then refreshes display after new downloads complete."
                            (when (memq (process-status proc) '(exit signal))
                              (funcall try-finish)))))))))))
 
+;;; Comment threading
+
+(defun go-jira--fetch-comment-parent-ids (issue-key)
+  "Fetch parent IDs for comments on ISSUE-KEY.
+The embedded comments in `jira view --template json' omit the parentId
+field, so we hit the dedicated comment endpoint which includes it.
+Returns a hash-table mapping comment-id (string) to parent-id (string)."
+  (let* ((j (go-jira--find-exe))
+         (endpoint (format "rest/api/2/issue/%s/comment" issue-key))
+         (cmd (format "%s request '%s' --method GET" j endpoint))
+         (output (shell-command-to-string cmd))
+         (json-object-type 'hash-table)
+         (json-key-type 'symbol)
+         (json-array-type 'list)
+         (parent-map (make-hash-table :test 'equal)))
+    (condition-case nil
+        (let* ((parsed (json-read-from-string output))
+               (comments (gethash 'comments parsed)))
+          (dolist (c comments)
+            (when-let ((parent-id (gethash 'parentId c))
+                       (id (gethash 'id c)))
+              (puthash (format "%s" id) (format "%s" parent-id) parent-map))))
+      (error nil))
+    parent-map))
+
+(defun go-jira--thread-comments (comments parent-map)
+  "Organise COMMENTS into threaded display order using PARENT-MAP.
+COMMENTS is the flat list from the API (chronological, oldest first).
+PARENT-MAP is a hash-table of child-id -> parent-id strings.
+
+Returns a list of (COMMENT . IS-REPLY) cons cells where top-level
+comments appear newest-first and replies sit chronologically under
+their parent."
+  (if (zerop (hash-table-count parent-map))
+      ;; No threading info - fall back to simple reverse (current behaviour)
+      (mapcar (lambda (c) (cons c nil)) (reverse comments))
+    (let ((children-map (make-hash-table :test 'equal))
+          top-level
+          result)
+      ;; Partition into top-level vs replies
+      (dolist (c comments)
+        (let* ((id (format "%s" (gethash 'id c)))
+               (parent-id (gethash id parent-map)))
+          (if parent-id
+              (push c (gethash parent-id children-map))
+            (push c top-level))))
+      ;; top-level is newest-first (push reversed the chronological input).
+      ;; children-map values are likewise reversed; we nreverse them below so
+      ;; replies read chronologically under each parent.
+      (dolist (parent top-level)
+        (push (cons parent nil) result)
+        (let* ((pid (format "%s" (gethash 'id parent)))
+               (replies (nreverse (gethash pid children-map))))
+          (dolist (reply replies)
+            (push (cons reply t) result))))
+      (nreverse result))))
+
 ;;; Public API - Ticket information
 
 (defun go-jira-summary (ticket)
@@ -375,7 +432,10 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                              ;; Fallback: fetch via API (single call, not per-comment)
                              (go-jira-ticket->url key))))
                ;; Parse attachment map for image support
-               (attachment-map (go-jira--parse-attachments parsed)))
+               (attachment-map (go-jira--parse-attachments parsed))
+               ;; Fetch comment parent IDs for threading
+               (parent-map (when comments
+                             (go-jira--fetch-comment-parent-ids key))))
           (with-current-buffer buf
             (setq-local buffer-read-only nil)
             (erase-buffer)
@@ -397,36 +457,47 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                 (insert "\n\n"))
               (when comments
                 (insert "** Comments\n")
-                (dolist (comment (reverse comments))
-                  (let* ((author (gethash 'author comment))
-                         (author-name (when author (gethash 'displayName author)))
-                         (author-id (when author (gethash 'accountId author)))
-                         (created (gethash 'created comment))
-                         (body (gethash 'body comment))
-                         (comment-id (gethash 'id comment)))
-                    (when body
-                      (let* ((timestamp (when created
-                                          (condition-case nil
-                                              (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
-                                            (error created))))
-                             ;; Create comment link if we have the comment ID
-                             (timestamp-link (if (and comment-id base-url)
-                                                 (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
-                                                         base-url comment-id comment-id timestamp)
-                                               timestamp))
-                             (heading-start (point)))
-                        (insert (format "*** %s - %s\n"
-                                        (or author-name "Unknown")
-                                        (or timestamp-link timestamp "")))
-                        ;; Store author ID as text property on the heading
-                        (when author-id
-                          (put-text-property heading-start (point) 'jira-comment-author author-id))
-                        ;; Only convert if body has markup
-                        (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
-                            (insert (go-jira-markup-shift-headings
-                                     (go-jira-markup-to-org body) 3))
-                          (insert body))
-                        (insert "\n\n")))))))
+                (let ((threaded (go-jira--thread-comments comments parent-map)))
+                  (dolist (entry threaded)
+                    (let* ((comment (car entry))
+                           (is-reply (cdr entry))
+                           (level (if is-reply 4 3))
+                           (stars (make-string level ?*))
+                           (author (gethash 'author comment))
+                           (author-name (when author (gethash 'displayName author)))
+                           (author-id (when author (gethash 'accountId author)))
+                           (created (gethash 'created comment))
+                           (body (gethash 'body comment))
+                           (comment-id (gethash 'id comment)))
+                      (when body
+                        (let* ((timestamp (when created
+                                            (condition-case nil
+                                                (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
+                                              (error created))))
+                               (timestamp-link (if (and comment-id base-url)
+                                                   (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
+                                                           base-url comment-id comment-id timestamp)
+                                                 timestamp))
+                               (heading-start (point)))
+                          (insert (format "%s %s - %s\n"
+                                          stars
+                                          (or author-name "Unknown")
+                                          (or timestamp-link timestamp "")))
+                          ;; Store author ID as text property on the heading
+                          (when author-id
+                            (put-text-property heading-start (point) 'jira-comment-author author-id))
+                          ;; Mark replies with an org property so edit-mode can
+                          ;; distinguish them from body headings at the same level.
+                          (when is-reply
+                            (let ((parent-id (gethash (format "%s" comment-id) parent-map)))
+                              (insert (format ":PROPERTIES:\n:JIRA_PARENT_ID: %s\n:END:\n"
+                                              (or parent-id "")))))
+                          ;; Only convert if body has markup
+                          (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
+                              (insert (go-jira-markup-shift-headings
+                                       (go-jira-markup-to-org body) level))
+                            (insert body))
+                          (insert "\n\n"))))))))
             (go-jira-view-mode)
             (put 'go-jira--ticket-number 'permanent-local t)
             (setq-local go-jira--ticket-number ticket)

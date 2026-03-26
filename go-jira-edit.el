@@ -279,17 +279,59 @@ If buffer is narrowed, uses narrowed bounds instead of absolute positions."
 
 ;;; Comment extraction
 
+(defun go-jira-edit--extract-comment-body (element heading-level)
+  "Extract body text from comment ELEMENT at HEADING-LEVEL.
+Excludes any reply sub-headings (identified by JIRA_PARENT_ID property)
+so that only the comment's own prose is returned.  Heading levels are
+normalised back to root-relative."
+  (let* ((contents-begin (org-element-property :contents-begin element))
+         (contents-end (org-element-property :contents-end element))
+         (reply-level (1+ heading-level)))
+    (if (not (and contents-begin contents-end))
+        ""
+      ;; Walk through contents, collecting text ranges that aren't reply headings
+      (let (body-parts
+            (pos contents-begin))
+        (save-excursion
+          (goto-char contents-begin)
+          (while (and (< (point) contents-end)
+                      (re-search-forward
+                       (format "^\\*\\{%d\\} " reply-level) contents-end t))
+            (goto-char (line-beginning-position))
+            (let* ((sub-el (org-element-at-point))
+                   (sub-begin (org-element-property :begin sub-el))
+                   (sub-end (org-element-property :end sub-el))
+                   ;; Only treat as a reply if it has JIRA_PARENT_ID property
+                   ;; (set by Jira for actual replies). Headings without it are
+                   ;; body content that happens to be at reply-level.
+                   (is-reply (org-entry-get sub-begin "JIRA_PARENT_ID")))
+              (when is-reply
+                ;; Collect text before this reply
+                (when (< pos sub-begin)
+                  (push (buffer-substring pos sub-begin) body-parts))
+                (setq pos sub-end))
+              (goto-char sub-end))))
+        ;; Collect remaining text after last reply
+        (when (< pos contents-end)
+          (push (buffer-substring pos contents-end) body-parts))
+        (go-jira-markup-shift-headings
+         (string-trim (apply #'concat (nreverse body-parts)))
+         (- heading-level))))))
+
 (defun go-jira-edit--extract-comments (&optional context)
-  "Extract user's comments from the ticket.
+  "Extract comments (including replies) from the ticket.
 CONTEXT is a plist with ticket bounds.  If nil, uses current context.
-Returns a list of plists with :body and optionally :id for existing comments."
+Returns a list of plists with :body, optionally :id for existing comments,
+and :parent-id for reply comments."
   (let* ((ctx (or context (go-jira-edit--get-ticket-context)))
          (start (plist-get ctx :start))
          (end (plist-get ctx :end))
          (level (plist-get ctx :level))
          (comments-level (+ level 1))  ; Comments heading is one level below ticket
          (comment-level (+ level 2))   ; Individual comments are two levels below ticket
-         comments)
+         (reply-level (+ level 3))     ; Reply comments are three levels below ticket
+         comments
+         current-parent-id)
     (save-excursion
       (save-restriction
         (widen)
@@ -301,35 +343,53 @@ Returns a list of plists with :body and optionally :id for existing comments."
           (goto-char (line-beginning-position))
           (let* ((comments-element (org-element-at-point))
                  (comments-end (org-element-property :end comments-element)))
-            ;; Parse all comment headings under Comments
+            ;; Parse all comment headings (both parent and reply levels)
             (goto-char (org-element-property :contents-begin comments-element))
             (while (and (< (point) comments-end)
-                        (re-search-forward (format "^\\*\\{%d\\} " comment-level) comments-end t))
+                        (re-search-forward
+                         (format "^\\*\\{%d,%d\\} " comment-level reply-level)
+                         comments-end t))
               (goto-char (line-beginning-position))
               (let* ((comment-element (org-element-at-point))
+                     (el-level (org-element-property :level comment-element))
                      (heading-text (org-element-property :raw-value comment-element))
-                     ;; Extract comment ID from URL if present
                      (comment-id (when (string-match "focusedCommentId=\\([0-9]+\\)" heading-text)
                                    (match-string 1 heading-text)))
-                     (is-new (not comment-id))
-                     ;; Extract body content, normalizing heading levels
-                     ;; so user-added headings inside comments start at level 1
-                     (contents-begin (org-element-property :contents-begin comment-element))
-                     (contents-end (org-element-property :contents-end comment-element))
-                     (body (if (and contents-begin contents-end)
-                               (go-jira-markup-shift-headings
-                                (string-trim (buffer-substring contents-begin contents-end))
-                                (- comment-level))
-                             "")))
+                     (is-new (not comment-id)))
 
-                ;; Include new comments OR existing comments (with ID in URL)
-                ;; Jira will reject edits to comments not owned by user anyway
-                (when (and (not (string-empty-p body))
-                           (or is-new comment-id))
-                  (push (list :body body :id comment-id) comments))
+                (cond
+                 ;; Parent comment (at comment-level)
+                 ((= el-level comment-level)
+                  (setq current-parent-id comment-id)
+                  (let ((body (go-jira-edit--extract-comment-body comment-element comment-level)))
+                    (when (and (not (string-empty-p body))
+                               (or is-new comment-id))
+                      (push (list :body body :id comment-id) comments)))
+                  (goto-char (org-element-property :contents-begin comment-element)))
 
-                ;; Move to next heading
-                (goto-char (org-element-property :end comment-element))))))))
+                 ;; Reply comment (at reply-level)
+                 ((= el-level reply-level)
+                  (let* ((parent-id-prop (org-entry-get (point) "JIRA_PARENT_ID"))
+                         (parent-id (or parent-id-prop
+                                        (and current-parent-id
+                                             (format "%s" current-parent-id))))
+                         (contents-begin (org-element-property :contents-begin comment-element))
+                         (contents-end (org-element-property :contents-end comment-element))
+                         (body (if (and contents-begin contents-end)
+                                   (go-jira-markup-shift-headings
+                                    (string-trim (buffer-substring contents-begin contents-end))
+                                    (- reply-level))
+                                 "")))
+                    ;; Only include if it looks like a reply (has property, ID, or parent context)
+                    (when (and (not (string-empty-p body))
+                               (or comment-id parent-id-prop
+                                   ;; new reply: user-added heading under a parent
+                                   current-parent-id))
+                      (push (list :body body :id comment-id :parent-id parent-id) comments)))
+                  (goto-char (org-element-property :end comment-element)))
+
+                 ;; Something else - skip
+                 (t (goto-char (org-element-property :end comment-element))))))))))
     (nreverse comments)))
 
 ;;; Public API
@@ -416,8 +476,7 @@ Creates an overlay with submit/abort controls."
                         (go-jira-markup-from-org desc-org)
                       ""))
          (json-file (make-temp-file "jira-edit-" nil ".json"))
-         (editor-script (make-temp-file "jira-editor-" nil ".sh"))
-         (buffer (current-buffer)))
+         (editor-script (make-temp-file "jira-editor-" nil ".sh")))
 
     (unless ticket-key
       (user-error "No ticket key found"))
@@ -472,36 +531,61 @@ Creates an overlay with submit/abort controls."
                 (setq request-count (1+ request-count))
                 (let* ((body (plist-get comment :body))
                        (id (plist-get comment :id))
-                       (jira-body (go-jira-markup-from-org body))
-                       (comment-op (if id
-                                       (list :edit (list :id id :body jira-body))
-                                     (list :add (list :body jira-body))))
-                       (comment-json (json-encode (list :update (list :comment (vector comment-op))))))
+                       (parent-id (plist-get comment :parent-id))
+                       (jira-body (go-jira-markup-from-org body)))
 
-                  (with-temp-file json-file
-                    (insert comment-json))
+                  (cond
+                   ;; New reply - POST directly to the comment endpoint with parentId
+                   ((and (not id) parent-id)
+                    (let* ((payload (json-encode `(:body ,jira-body
+                                                   :parentId ,(string-to-number parent-id))))
+                           (endpoint (format "rest/api/2/issue/%s/comment" ticket-key)))
+                      (when go-jira-debug
+                        (message "[Request %d] Adding reply (parent:%s)..." request-count parent-id))
+                      (with-temp-buffer
+                        (let ((exit-code (call-process j nil (current-buffer) nil
+                                                       "request" endpoint payload
+                                                       "--method" "POST")))
+                          (let ((result (buffer-string)))
+                            (when (or (not (zerop exit-code))
+                                      (string-match-p "\"errorMessages\"" result))
+                              (setq success nil)
+                              (message "Failed to add reply: %s" result)))))))
 
-                  (when go-jira-debug
-                    (message "[Request %d] %s comment (id:%s)..."
-                             request-count
-                             (if id "Editing" "Adding")
-                             (or id "new")))
+                   ;; Existing comment (edit) or new top-level comment (add)
+                   (t
+                    (let* ((comment-op (if id
+                                           (list :edit (list :id id :body jira-body))
+                                         (list :add (list :body jira-body))))
+                           (comment-json (json-encode
+                                          (list :update (list :comment (vector comment-op))))))
 
-                  (with-temp-file editor-script
-                    (insert "#!/bin/bash\n")
-                    (insert (format "cat %s > \"$1\"\n" (shell-quote-argument json-file))))
-                  (set-file-modes editor-script #o755)
+                      (with-temp-file json-file
+                        (insert comment-json))
 
-                  (with-temp-buffer
-                    (let ((exit-code (call-process j nil (current-buffer) nil
-                                                   "edit" ticket-key
-                                                   "--editor" editor-script
-                                                   "--template" "json")))
-                      (let ((result (buffer-string)))
-                        (when (or (not (zerop exit-code))
-                                  (string-match-p "error\\|failed" (downcase result)))
-                          (setq success nil)
-                          (message "Failed to update comment: %s" result))))))))
+                      (when go-jira-debug
+                        (message "[Request %d] %s comment (id:%s)..."
+                                 request-count
+                                 (if id "Editing" "Adding")
+                                 (or id "new")))
+
+                      (with-temp-file editor-script
+                        (insert "#!/bin/bash\n")
+                        (insert (format "cat %s > \"$1\"\n" (shell-quote-argument json-file))))
+                      (set-file-modes editor-script #o755)
+
+                      (with-temp-buffer
+                        (let ((exit-code (call-process j nil (current-buffer) nil
+                                                       "edit" ticket-key
+                                                       "--editor" editor-script
+                                                       "--template" "json")))
+                          (let ((result (buffer-string)))
+                            (when (or (not (zerop exit-code))
+                                      (string-match-p "error\\|failed" (downcase result)))
+                              (setq success nil)
+                              (message "Failed to update comment: %s" result)))))))))))
+
+
 
             ;; Remove overlay after successful submission
             (go-jira-edit--remove-overlay)

@@ -365,7 +365,7 @@ STATE is the visibility state after cycling."
 
 (defun go-jira--fetch-issue-details (issue-key)
   "Fetch detailed issue information for ISSUE-KEY as JSON.
-Returns a plist with :description, :comments, :self-url, :attachment-map."
+Returns a plist with :description, :comments, :parent-map, :attachment-map."
   (let* ((j (go-jira--find-exe))
          (cmd (format "%s view %s --template json" j issue-key))
          (output (shell-command-to-string cmd)))
@@ -378,9 +378,12 @@ Returns a plist with :description, :comments, :self-url, :attachment-map."
                (description (when fields (gethash 'description fields)))
                (comment-data (when fields (gethash 'comment fields)))
                (comments (when comment-data (gethash 'comments comment-data)))
-               (attachment-map (go-jira--parse-attachments parsed)))
+               (attachment-map (go-jira--parse-attachments parsed))
+               (parent-map (when comments
+                             (go-jira--fetch-comment-parent-ids issue-key))))
           (list :description description
                 :comments comments
+                :parent-map parent-map
                 :attachment-map attachment-map))
       (error
        (message "Warning: Failed to fetch issue details: %s" (error-message-string err))
@@ -463,6 +466,7 @@ SUBTASKS and LINKED-ITEMS are optional strings.  DETAILS is a plist with
           (let ((inhibit-read-only t)
                 (description (plist-get details :description))
                 (comments (plist-get details :comments))
+                (parent-map (plist-get details :parent-map))
                 (attachment-map (plist-get details :attachment-map))
                 (after-change-functions (remove 'org-fold-core--fix-folded-region after-change-functions)))
 
@@ -492,31 +496,40 @@ SUBTASKS and LINKED-ITEMS are optional strings.  DETAILS is a plist with
               ;; Insert comments
               (when comments
                 (insert (format "%s Comments\n" (make-string description-level ?*)))
-                (dolist (comment (reverse comments))
-                  (let* ((author (gethash 'author comment))
-                         (author-name (when author (gethash 'displayName author)))
-                         (created (gethash 'created comment))
-                         (body (gethash 'body comment))
-                         (comment-id (gethash 'id comment)))
-                    (when body
-                      (let* ((timestamp (when created
-                                          (condition-case nil
-                                              (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
-                                            (error created))))
-                             (timestamp-link (if (and comment-id base-url)
-                                               (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
-                                                       base-url comment-id comment-id timestamp)
-                                             timestamp)))
-                      (insert (format "%s %s - %s\n"
-                                      (make-string comment-author-level ?*)
-                                      (or author-name "Unknown")
-                                      (or timestamp-link timestamp "")))
-                      (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
-                          (let ((converted (go-jira-markup-to-org body)))
-                            (when converted
-                              (insert (go-jira--adjust-heading-levels converted comment-author-level))))
-                        (insert body))
-                      (insert "\n"))))))  ;; close let* timestamp, when body, let* author, dolist, when comments
+                (let ((threaded (go-jira--thread-comments comments parent-map)))
+                  (dolist (entry threaded)
+                    (let* ((comment (car entry))
+                           (is-reply (cdr entry))
+                           (level (if is-reply (1+ comment-author-level) comment-author-level))
+                           (author (gethash 'author comment))
+                           (author-name (when author (gethash 'displayName author)))
+                           (created (gethash 'created comment))
+                           (body (gethash 'body comment))
+                           (comment-id (gethash 'id comment)))
+                      (when body
+                        (let* ((timestamp (when created
+                                            (condition-case nil
+                                                (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
+                                              (error created))))
+                               (timestamp-link (if (and comment-id base-url)
+                                                   (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
+                                                           base-url comment-id comment-id timestamp)
+                                                 timestamp))
+                               (heading-start (point)))
+                          (insert (format "%s %s - %s\n"
+                                          (make-string level ?*)
+                                          (or author-name "Unknown")
+                                          (or timestamp-link timestamp "")))
+                          (when is-reply
+                            (let ((pid (gethash (format "%s" comment-id) parent-map)))
+                              (insert (format ":PROPERTIES:\n:JIRA_PARENT_ID: %s\n:END:\n"
+                                              (or pid "")))))
+                          (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
+                              (let ((converted (go-jira-markup-to-org body)))
+                                (when converted
+                                  (insert (go-jira--adjust-heading-levels converted level))))
+                            (insert body))
+                          (insert "\n")))))))  ;; close let* timestamp, when body, let* author, dolist entry, let threaded, when comments
 
               (unless (looking-at-p "^\\s-*$")
                 (insert "\n"))))  ;; close unless, let attachment-map, let inhibit-read-only
@@ -551,19 +564,36 @@ in the background, and fills in real content when the response arrives."
           (let ((inhibit-read-only t))
             (insert "Loading...\n"))))))
 
-  ;; Fire off async fetch — all three calls in parallel
+  ;; Fire off async fetch — all four calls in parallel
   (let* ((j (go-jira--find-exe))
          (detail-buf (generate-new-buffer (format " *jira-detail-%s*" issue-key)))
          (subtask-buf (generate-new-buffer (format " *jira-subtask-%s*" issue-key)))
          (linked-buf (generate-new-buffer (format " *jira-linked-%s*" issue-key)))
-         ;; Track completion of all 3 processes
-         (pending (list 'details 'subtasks 'linked))
+         (comment-parents-buf (generate-new-buffer (format " *jira-cparents-%s*" issue-key)))
+         ;; Track completion of all 4 processes
+         (pending (list 'details 'subtasks 'linked 'comment-parents))
          (try-finish
           (lambda ()
             (when (null pending)
               ;; All done — parse and insert
               (condition-case err
                   (let* ((json-output (with-current-buffer detail-buf (buffer-string)))
+                         ;; Parse comment parent IDs from dedicated endpoint
+                         (parent-map
+                          (condition-case nil
+                              (let* ((json-object-type 'hash-table)
+                                     (json-key-type 'symbol)
+                                     (json-array-type 'list)
+                                     (cp-output (with-current-buffer comment-parents-buf (buffer-string)))
+                                     (cp-parsed (json-read-from-string cp-output))
+                                     (cp-comments (gethash 'comments cp-parsed))
+                                     (pmap (make-hash-table :test 'equal)))
+                                (dolist (c cp-comments)
+                                  (when-let ((pid (gethash 'parentId c))
+                                             (id (gethash 'id c)))
+                                    (puthash (format "%s" id) (format "%s" pid) pmap)))
+                                pmap)
+                            (error (make-hash-table :test 'equal))))
                          (details (condition-case nil
                                       (let* ((json-object-type 'hash-table)
                                              (json-key-type 'symbol)
@@ -578,6 +608,7 @@ in the background, and fills in real content when the response arrives."
                                         (list :description description
                                               :comments comments
                                               :self-url self-url
+                                              :parent-map parent-map
                                               :attachment-map attachment-map))
                                     (error nil)))
                          (subtasks (let ((s (string-trim
@@ -595,7 +626,8 @@ in the background, and fills in real content when the response arrives."
               ;; Clean up temp buffers
               (kill-buffer detail-buf)
               (kill-buffer subtask-buf)
-              (kill-buffer linked-buf)))))
+              (kill-buffer linked-buf)
+              (kill-buffer comment-parents-buf)))))
     ;; Process 1: issue details (JSON)
     (make-process
      :name (format "jira-detail-%s" issue-key)
@@ -622,6 +654,17 @@ in the background, and fills in real content when the response arrives."
      :sentinel (lambda (proc _event)
                  (when (memq (process-status proc) '(exit signal))
                    (setq pending (delq 'linked pending))
+                   (funcall try-finish))))
+    ;; Process 4: comment parent IDs (for threading)
+    (make-process
+     :name (format "jira-cparents-%s" issue-key)
+     :buffer comment-parents-buf
+     :command (list j "request"
+                    (format "rest/api/2/issue/%s/comment" issue-key)
+                    "--method" "GET")
+     :sentinel (lambda (proc _event)
+                 (when (memq (process-status proc) '(exit signal))
+                   (setq pending (delq 'comment-parents pending))
                    (funcall try-finish))))))
 
 (define-derived-mode go-jira-board-view-mode org-mode "Jira-Board"
@@ -691,7 +734,7 @@ in the background, and fills in real content when the response arrives."
   (if-let ((board-data (buffer-local-value 'go-jira--board-data (current-buffer))))
       (progn
         (message "Refreshing board...")
-        (go-jira-display-board board-data))
+        (go-jira-display-board board-data 'refresh))
     (user-error "No board data found in current buffer")))
 
 ;;; Public API

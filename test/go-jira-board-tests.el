@@ -366,6 +366,23 @@
                   :to-equal "https://example.atlassian.net/secure/RapidBoard.jspa?rapidView=3018")))
       (kill-buffer))))
 
+(describe "go-jira-board-refresh"
+  (it "calls go-jira-display-board with force-refresh"
+    (with-current-buffer (go-jira-board-test--setup-board-buffer)
+      (let (captured-args)
+        (cl-letf (((symbol-function 'go-jira-display-board)
+                   (lambda (&optional board-data force-refresh)
+                     (setq captured-args (list board-data force-refresh)))))
+          (go-jira-board-refresh)
+          (expect (car captured-args) :to-equal go-jira--board-data)
+          (expect (cadr captured-args) :to-be-truthy)))
+      (kill-buffer)))
+
+  (it "signals error when no board data"
+    (with-temp-buffer
+      (expect (go-jira-board-refresh)
+              :to-throw 'user-error))))
+
 (describe "go-jira-board-browse-issue-url"
   (it "calls browse-url with the issue URL"
     (with-current-buffer (go-jira-board-test--setup-board-buffer)
