@@ -248,6 +248,10 @@ Handles pagination automatically.  Returns a list of issue plists."
          (assignee-name (when assignee (gethash 'displayName assignee)))
          (priority (gethash 'priority fields))
          (priority-name (when priority (gethash 'name priority)))
+         (reporter (gethash 'reporter fields))
+         (reporter-name (when reporter (gethash 'displayName reporter)))
+         (sprint (gethash 'sprint fields))
+         (sprint-name (when sprint (gethash 'name sprint)))
          (issuetype (gethash 'issuetype fields))
          (issuetype-name (when issuetype (gethash 'name issuetype)))
          (labels (gethash 'labels fields)))
@@ -256,7 +260,9 @@ Handles pagination automatically.  Returns a list of issue plists."
           :status-id status-id
           :status-name status-name
           :assignee assignee-name
+          :reporter reporter-name
           :priority priority-name
+          :sprint sprint-name
           :issuetype issuetype-name
           :labels (when labels (mapcar #'identity labels)))))
 
@@ -286,7 +292,7 @@ Returns an alist of (column-name . (issue-list))."
       (erase-buffer)
 
       ;; Insert org-columns setup
-      (insert "#+COLUMNS: %50ITEM %12TODO %15ASSIGNEE %12PRIORITY %10ISSUETYPE %25LABELS\n")
+      (insert "#+COLUMNS: %50ITEM %12TODO %15ASSIGNEE %15REPORTER %12PRIORITY %12SPRINT %10ISSUETYPE %25LABELS\n")
       (insert "#+TITLE: " board-name "\n\n")
 
       ;; Insert each column with its issues
@@ -310,7 +316,9 @@ Returns an alist of (column-name . (issue-list))."
         (summary (plist-get issue :summary))
         (status (or (plist-get issue :status-name) ""))
         (assignee (or (plist-get issue :assignee) "Unassigned"))
+        (reporter (or (plist-get issue :reporter) ""))
         (priority (or (plist-get issue :priority) ""))
+        (sprint (or (plist-get issue :sprint) ""))
         (issuetype (or (plist-get issue :issuetype) ""))
         (labels (plist-get issue :labels)))
     (insert "** " key ": " summary "\n")
@@ -318,7 +326,9 @@ Returns an alist of (column-name . (issue-list))."
     (insert ":ISSUE_KEY: " key "\n")
     (insert ":TODO: " status "\n")
     (insert ":ASSIGNEE: " assignee "\n")
+    (insert ":REPORTER: " reporter "\n")
     (insert ":PRIORITY: " priority "\n")
+    (insert ":SPRINT: " sprint "\n")
     (insert ":ISSUETYPE: " issuetype "\n")
     (when labels
       (insert ":LABELS: " (mapconcat #'identity labels ", ") "\n"))
