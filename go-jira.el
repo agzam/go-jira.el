@@ -115,7 +115,10 @@ Returns a plist with :ticket, :url, and :summary."
              (json-key-type 'symbol)
              (json-array-type 'list)
              (parsed (json-read-from-string res))
-             (summary (gethash 'summary parsed))
+             (summary (thread-last
+                        (gethash 'summary parsed)
+                        (replace-regexp-in-string "\\[" "{")
+                        (replace-regexp-in-string "\\]" "}")))
              (url (gethash 'url parsed)))
         (list :ticket ticket :url url :summary summary)))))
 
@@ -274,17 +277,30 @@ their parent."
 
 ;;;###autoload
 (defun go-jira-ticket->link (&optional ticket-arg)
-  "Convert the TICKET-ARG number at point to `org-mode' link."
-  (interactive)
-  (let* ((ticket (go-jira--ticket-arg-or-ticket-at-point ticket-arg))
+  "Convert the TICKET-ARG number at point to a link.
+With universal argument, include the ticket summary in the link.
+In `org-mode' produces an Org link, in `markdown-mode' a Markdown
+link, otherwise a plain URL."
+  (interactive "P")
+  (let* ((ticket (go-jira--ticket-arg-or-ticket-at-point
+                  (when (and ticket-arg (not (equal ticket-arg '(4))))
+                    ticket-arg)))
          (sum+url (go-jira--summary+url ticket))
          (ticket (plist-get sum+url :ticket))
          (url (plist-get sum+url :url))
          (summary (plist-get sum+url :summary))
-         (result (if (eq major-mode 'org-mode)
-                     (format "[[%s][%s: %s]]" url ticket summary)
-                   (format "[%s: %s](%s)" ticket summary url))))
-    (if ticket-arg
+         (with-desc-p (equal ticket-arg '(4)))
+         (result (cond
+                  ((derived-mode-p 'org-mode)
+                   (if with-desc-p
+                       (format "[[%s][%s: %s]]" url ticket summary)
+                     (format "[[%s][%s]]" url ticket)))
+                  ((derived-mode-p 'markdown-mode)
+                   (if with-desc-p
+                       (format "[%s: %s](%s)" ticket summary url)
+                     (format "[%s](%s)" ticket url)))
+                  (t url))))
+    (if (and ticket-arg (not with-desc-p))
         result
       (let ((bounds (bounds-of-thing-at-point 'symbol)))
         (delete-region (car bounds) (cdr bounds))
@@ -420,6 +436,18 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                (key (gethash 'key parsed))
                (fields (gethash 'fields parsed))
                (summary (when fields (gethash 'summary fields)))
+               (status (when fields (gethash 'status fields)))
+               (status-name (when status (gethash 'name status)))
+               (assignee (when fields (gethash 'assignee fields)))
+               (assignee-name (when assignee (gethash 'displayName assignee)))
+               (reporter (when fields (gethash 'reporter fields)))
+               (reporter-name (when reporter (gethash 'displayName reporter)))
+               (priority (when fields (gethash 'priority fields)))
+               (priority-name (when priority (gethash 'name priority)))
+               (sprint (when fields (gethash 'sprint fields)))
+               (sprint-name (when sprint (gethash 'name sprint)))
+               (issuetype (when fields (gethash 'issuetype fields)))
+               (issuetype-name (when issuetype (gethash 'name issuetype)))
                (description (when fields (gethash 'description fields)))
                (comment-data (when fields (gethash 'comment fields)))
                (comments (when comment-data (gethash 'comments comment-data)))
@@ -440,6 +468,15 @@ becomes SAC-28812__add_new_metadata_tap-asana"
             (setq-local buffer-read-only nil)
             (erase-buffer)
             (insert (format "* %s: %s\n" key summary))
+            (insert ":PROPERTIES:\n")
+            (insert ":ISSUE_KEY: " key "\n")
+            (insert ":TODO: " (or status-name "") "\n")
+            (insert ":ASSIGNEE: " (or assignee-name "Unassigned") "\n")
+            (insert ":REPORTER: " (or reporter-name "") "\n")
+            (insert ":PRIORITY: " (or priority-name "") "\n")
+            (insert ":SPRINT: " (or sprint-name "") "\n")
+            (insert ":ISSUETYPE: " (or issuetype-name "") "\n")
+            (insert ":END:\n")
             ;; Bind attachment map for markup conversion (image path rewriting)
             (let ((go-jira-markup--attachment-map attachment-map))
               (when description
@@ -502,6 +539,7 @@ becomes SAC-28812__add_new_metadata_tap-asana"
             (put 'go-jira--ticket-number 'permanent-local t)
             (setq-local go-jira--ticket-number ticket)
             (goto-char (point-min))
+            (org-cycle-hide-drawers 'all)
             ;; Download and display images asynchronously
             (go-jira--download-attachments-async buf))
           (display-buffer buf)
