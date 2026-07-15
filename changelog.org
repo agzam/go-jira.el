@@ -8,7 +8,21 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+* [[0.2.0]] - 2026-07-15
+
 ** Added
+- Ticket status (workflow transition) switching via =go-jira-change-status=
+  - Presents the transitions valid from the ticket's current state, fetched
+    live from Jira, so each project's workflow is honored automatically
+  - Available in the ticket view and board buffers, as an Embark action, or on
+    a ticket number at point
+  - New module =go-jira-status.el=
+- Status-based colorization of issue keys in the ticket view, board, and hover
+  popup, derived from Jira's status category (To Do / In Progress / Done)
+  - Optional =go-jira-status-face-alist= for per-status color overrides
+  - Faces =go-jira-status-todo-face=, =go-jira-status-in-progress-face=,
+    =go-jira-status-done-face= and =go-jira-status-default-face=
+- Hover popup now shows the ticket status alongside the summary
 - Comment support for Jira tickets with overlay-based UI
   - =go-jira-add-comment= command bound to =C= in both view and board modes
   - Inline comment composition using Org-mode markup
@@ -26,11 +40,21 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 - Comprehensive documentation in =COMMENT-FEATURE.md=
 
 ** Changed
+- Eldoc/popup now fetches full ticket JSON (summary and status) instead of the
+  summary alone; a status change invalidates the ticket's cached popup entry so
+  its color refreshes immediately
 - Updated =go-jira-view-mode= help message to include comment command
 - Updated =go-jira-board-view-mode= help message to include comment command
 - Updated =readme.org= with comment feature documentation
 
 ** Technical
+- Status transitions use the go-jira REST bridge (=jira request .../transitions=)
+- Status colors resolve via Jira =statusCategory= and are applied through a
+  font-lock keyword so they survive Org heading refontification
+- Embark actions read the target ticket via their first minibuffer prompt, so
+  the target is injected there rather than into a later picker
+- Buttercup coverage for transition parsing, colorization, faces, Embark target
+  handling and popup cache invalidation
 - Comment submission uses temporary files to avoid shell escaping issues
 - Placeholder-based protection mechanism prevents conversion conflicts
 - Overlay management inspired by gptel's tool-use interface

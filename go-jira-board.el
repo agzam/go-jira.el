@@ -1,7 +1,7 @@
 ;;; go-jira-board.el --- Jira board browsing for go-jira -*- lexical-binding: t; -*-
 ;; Copyright (C) 2024 Ag Ibragimov
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -244,6 +244,8 @@ Handles pagination automatically.  Returns a list of issue plists."
          (status (gethash 'status fields))
          (status-id (when status (gethash 'id status)))
          (status-name (when status (gethash 'name status)))
+         (status-category (when status (gethash 'statusCategory status)))
+         (status-category-key (when status-category (gethash 'key status-category)))
          (assignee (gethash 'assignee fields))
          (assignee-name (when assignee (gethash 'displayName assignee)))
          (priority (gethash 'priority fields))
@@ -259,6 +261,7 @@ Handles pagination automatically.  Returns a list of issue plists."
           :summary summary
           :status-id status-id
           :status-name status-name
+          :status-category-key status-category-key
           :assignee assignee-name
           :reporter reporter-name
           :priority priority-name
@@ -315,13 +318,19 @@ Returns an alist of (column-name . (issue-list))."
   (let ((key (plist-get issue :key))
         (summary (plist-get issue :summary))
         (status (or (plist-get issue :status-name) ""))
+        (category-key (plist-get issue :status-category-key))
         (assignee (or (plist-get issue :assignee) "Unassigned"))
         (reporter (or (plist-get issue :reporter) ""))
         (priority (or (plist-get issue :priority) ""))
         (sprint (or (plist-get issue :sprint) ""))
         (issuetype (or (plist-get issue :issuetype) ""))
         (labels (plist-get issue :labels)))
-    (insert "** " key ": " summary "\n")
+    (insert "** ")
+    (let ((key-start (point)))
+      (insert key)
+      (put-text-property key-start (point) 'jira-status-key
+                         (go-jira--status-face status category-key)))
+    (insert ": " (or summary "") "\n")
     (insert ":PROPERTIES:\n")
     (insert ":ISSUE_KEY: " key "\n")
     (insert ":TODO: " status "\n")
@@ -351,6 +360,7 @@ Returns an alist of (column-name . (issue-list))."
     (define-key map (kbd "C-c M-o") #'go-jira-board-view-open-browser)
     (define-key map (kbd "C-c M-y") #'go-jira-board-view-copy-url)
     (define-key map (kbd "C-c M-r") #'go-jira-board-refresh)
+    (define-key map (kbd "C-c C-s") #'go-jira-change-status)
     (define-key map (kbd "C-c M-q") #'quit-window)
     map)
   "Keymap for go-jira-board-view-mode.")
@@ -687,7 +697,10 @@ in the background, and fills in real content when the response arrives."
 
   ;; Add font-lock for Jira headings
   (font-lock-add-keywords nil
-   '((go-jira--fontify-jira-headings))))
+   '((go-jira--fontify-jira-headings)))
+  ;; Colorize issue keys by status (append so it wins over Org heading faces)
+  (font-lock-add-keywords nil
+   '((go-jira--fontify-status-keys)) t))
 
 (defun go-jira-board-view-issue ()
   "View the Jira issue at point."

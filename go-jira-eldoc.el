@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Ag Ibragimov
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -62,18 +62,22 @@ Only fetch after cursor has been stable on a ticket for this duration."
 ;;; Internal cache functions
 
 (defun go-jira-eldoc--cache-get (ticket)
-  "Get TICKET description from cache if valid."
+  "Get cached info for TICKET if still valid."
   (when-let* ((entry (gethash ticket go-jira-eldoc-cache))
               (timestamp (car entry))
-              (description (cdr entry)))
+              (info (cdr entry)))
     (if (< (- (float-time) timestamp) go-jira-eldoc-cache-ttl)
-        description
+        info
       (remhash ticket go-jira-eldoc-cache)
       nil)))
 
-(defun go-jira-eldoc--cache-put (ticket description)
-  "Store TICKET DESCRIPTION in cache with current timestamp."
-  (puthash ticket (cons (float-time) description) go-jira-eldoc-cache))
+(defun go-jira-eldoc--cache-put (ticket info)
+  "Store TICKET INFO in cache with current timestamp."
+  (puthash ticket (cons (float-time) info) go-jira-eldoc-cache))
+
+(defun go-jira-eldoc--cache-invalidate (ticket)
+  "Drop the cached info for TICKET so it is refetched on next request."
+  (remhash ticket go-jira-eldoc-cache))
 
 (defun go-jira-eldoc--clear-cache ()
   "Clear the entire Jira eldoc cache."
@@ -81,16 +85,36 @@ Only fetch after cursor has been stable on a ticket for this duration."
   (clrhash go-jira-eldoc-cache)
   (message "Jira eldoc cache cleared"))
 
+(defun go-jira-eldoc--parse-info (json-string)
+  "Parse JSON-STRING from `jira view --template json' into an info plist.
+Returns a plist with :summary, :status and :category, or nil when the
+summary is empty or the JSON cannot be parsed."
+  (condition-case nil
+      (let* ((json-object-type 'hash-table)
+             (json-key-type 'symbol)
+             (json-array-type 'list)
+             (parsed (json-read-from-string json-string))
+             (fields (gethash 'fields parsed))
+             (summary (when fields (gethash 'summary fields)))
+             (status (when fields (gethash 'status fields)))
+             (status-name (when status (gethash 'name status)))
+             (category (when status (gethash 'statusCategory status)))
+             (category-key (when category (gethash 'key category))))
+        (when (and summary (not (string-empty-p summary)))
+          (list :summary summary :status status-name :category category-key)))
+    (error nil)))
+
 (defun go-jira-eldoc--fetch-description-async (ticket callback)
-  "Fetch description for TICKET asynchronously, call CALLBACK with result.
-CALLBACK is called with two arguments: TICKET and DESCRIPTION.
-Returns the process object."
+  "Fetch info for TICKET asynchronously, call CALLBACK with the result.
+CALLBACK receives two arguments: TICKET and an info plist with :summary,
+:status and :category keys.  Returns the process object, or nil when the
+result is served from cache."
   (if-let ((cached (go-jira-eldoc--cache-get ticket)))
       (progn
         (funcall callback ticket cached)
         nil)
     (let* ((j (go-jira--find-exe))
-           (cmd (format "%s view %s --gjq 'fields.summary'" j ticket))
+           (cmd (format "%s view %s --template json" j ticket))
            (output-buffer (generate-new-buffer " *jira-fetch*"))
            (proc (make-process
                   :name (format "jira-fetch-%s" ticket)
@@ -100,10 +124,9 @@ Returns the process object."
                   (lambda (process event)
                     (when (string-match-p "finished" event)
                       (with-current-buffer (process-buffer process)
-                        (let ((summary (string-trim (buffer-string))))
-                          (unless (string-empty-p summary)
-                            (go-jira-eldoc--cache-put ticket summary)
-                            (funcall callback ticket summary)))))
+                        (when-let ((info (go-jira-eldoc--parse-info (buffer-string))))
+                          (go-jira-eldoc--cache-put ticket info)
+                          (funcall callback ticket info))))
                     (kill-buffer (process-buffer process))))))
       proc)))
 
@@ -126,10 +149,20 @@ Returns the process object."
 
 ;;; Posframe popup functions
 
-(defun go-jira-popup--format-description (ticket description)
-  "Format TICKET and DESCRIPTION for popup display."
-  (let* ((ticket-bold (propertize ticket 'face '(:weight bold)))
-         (full-text (format "%s: %s" ticket-bold description))
+(defun go-jira-popup--format-description (ticket info)
+  "Format TICKET and INFO for popup display.
+INFO is an info plist with :summary/:status/:category, or a plain summary
+string.  The ticket key is bolded and tinted by status, and a colored
+[STATUS] tag is shown when a status is available."
+  (let* ((summary (if (stringp info) info (plist-get info :summary)))
+         (status (unless (stringp info) (plist-get info :status)))
+         (category (unless (stringp info) (plist-get info :category)))
+         (face (go-jira--status-face status category))
+         (ticket-part (propertize ticket 'face `(bold ,face)))
+         (status-part (if status
+                          (concat " " (propertize (format "[%s]" status) 'face face))
+                        ""))
+         (full-text (format "%s%s: %s" ticket-part status-part (or summary "")))
          (max-width go-jira-popup-max-width))
     (with-temp-buffer
       (insert full-text)
@@ -249,11 +282,15 @@ Designed to work with `eldoc-documentation-functions'."
     ;; Fetch asynchronously to avoid blocking
     (go-jira-eldoc--fetch-description-async
      ticket
-     (lambda (tkt desc)
-       (funcall callback
-                (format "%s: %s" tkt desc)
-                :thing tkt
-                :face 'font-lock-doc-face)))))
+     (lambda (tkt info)
+       (let ((summary (if (stringp info) info (plist-get info :summary)))
+             (status (unless (stringp info) (plist-get info :status))))
+         (funcall callback
+                  (if status
+                      (format "%s [%s]: %s" tkt status summary)
+                    (format "%s: %s" tkt summary))
+                  :thing tkt
+                  :face 'font-lock-doc-face))))))
 
 ;;;###autoload
 (define-minor-mode go-jira-eldoc-mode

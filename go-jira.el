@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Ag Ibragimov
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1") (consult "1.0") (s "1.13.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -33,6 +33,7 @@
 (require 's)
 
 (require 'go-jira-edit)
+(require 'go-jira-status)
 
 (defgroup go-jira nil
   "Emacs interface to go-jira CLI tool."
@@ -377,6 +378,7 @@ becomes SAC-28812__add_new_metadata_tap-asana"
     (define-key map (kbd "C-c C-y") #'go-jira-view-mode-copy-url)
     (define-key map (kbd "C-c C-o") #'go-jira-view-mode-open-browser)
     (define-key map (kbd "C-c M-r") #'go-jira-view-mode-refresh)
+    (define-key map (kbd "C-c C-s") #'go-jira-change-status)
     (define-key map (kbd "C-c M-q") #'kill-buffer-and-window)
     map)
   "Keymap for `go-jira-view-mode'.")
@@ -390,7 +392,10 @@ becomes SAC-28812__add_new_metadata_tap-asana"
   
   ;; Add font-lock for Jira headings
   (font-lock-add-keywords nil
-   '((go-jira--fontify-jira-headings))))
+   '((go-jira--fontify-jira-headings)))
+  ;; Colorize issue keys by status (append so it wins over Org heading faces)
+  (font-lock-add-keywords nil
+   '((go-jira--fontify-status-keys)) t))
 
 (defun go-jira-view-mode-open-browser ()
   "Open ticket in browser from jira view mode."
@@ -438,6 +443,8 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                (summary (when fields (gethash 'summary fields)))
                (status (when fields (gethash 'status fields)))
                (status-name (when status (gethash 'name status)))
+               (status-category (when status (gethash 'statusCategory status)))
+               (status-category-key (when status-category (gethash 'key status-category)))
                (assignee (when fields (gethash 'assignee fields)))
                (assignee-name (when assignee (gethash 'displayName assignee)))
                (reporter (when fields (gethash 'reporter fields)))
@@ -467,7 +474,12 @@ becomes SAC-28812__add_new_metadata_tap-asana"
           (with-current-buffer buf
             (setq-local buffer-read-only nil)
             (erase-buffer)
-            (insert (format "* %s: %s\n" key summary))
+            (insert "* ")
+            (let ((key-start (point)))
+              (insert key)
+              (put-text-property key-start (point) 'jira-status-key
+                                 (go-jira--status-face status-name status-category-key)))
+            (insert ": " (or summary "") "\n")
             (insert ":PROPERTIES:\n")
             (insert ":ISSUE_KEY: " key "\n")
             (insert ":TODO: " (or status-name "") "\n")

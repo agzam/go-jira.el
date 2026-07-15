@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Ag Ibragimov
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira, markup
 ;; URL: https://github.com/agzam/go-jira.el
