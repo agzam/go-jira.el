@@ -46,6 +46,7 @@ check-compile: deps
 	--eval "(setq byte-compile-error-on-warn t)" \
 	--eval "(add-to-list 'load-path \".\")" \
 	--eval "(byte-compile-file \"go-jira-status.el\")" \
+	--eval "(byte-compile-file \"go-jira-assign.el\")" \
 	--eval "(byte-compile-file \"go-jira.el\")" \
 	--eval "(byte-compile-file \"go-jira-board.el\")" \
 	--eval "(byte-compile-file \"go-jira-markup.el\")" \

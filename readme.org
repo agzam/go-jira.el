@@ -41,6 +41,8 @@ Main buffer for ticket overview. Shows the ticket description, subtasks, linked 
 | C-C C-y | go-jira-view-mode-copy-url     | Copy ticket url                     |
 | C-c C-o | go-jira-view-mode-open-browser | Open ticket in the browser          |
 | C-c M-r | go-jira-view-mode-refresh      | Pull ticket data from Jira          |
+| C-c C-s | go-jira-change-status          | Change the ticket status            |
+| C-c C-a | go-jira-assign                 | Assign the ticket to a user         |
 | C-c M-q | kill-buffer-and-window         |                                     |
 
 *** ~go-jira-display-board~
@@ -56,6 +58,8 @@ Consult picker that allows you to find a board and display the list of tickets o
 | C-c M-o | go-jira-board-view-open-browser   | Open board URL in browser                                  |
 | C-c M-y | go-jira-board-view-copy-url       | Copy board URL                                             |
 | C-c M-r | go-jira-board-refresh             | Pull board data from Jira                                  |
+| C-c C-s | go-jira-change-status             | Change the status of the ticket at point                   |
+| C-c C-a | go-jira-assign                    | Assign the ticket at point to a user                       |
 | C-c M-q | quit-window                       |                                                            |
   
 

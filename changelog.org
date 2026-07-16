@@ -8,6 +8,24 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+* [[0.3.0]] - 2026-07-16
+
+** Added
+- Ticket assignee switching via =go-jira-assign=
+  - Presents the users assignable to the ticket, fetched live from Jira, so
+    each project's permissions are honored automatically
+  - Offers "Assign to me" first, flipping to "None" to unassign when the ticket
+    is already assigned to you
+  - Available in the ticket view and board buffers (=C-c C-a=), as an Embark
+    action, or on a ticket number at point
+  - New module =go-jira-assign.el=
+
+** Technical
+- Assignee changes use the go-jira REST bridge (=jira request
+  .../assignee --method PUT=); unassigning sends =accountId: null=
+- Buttercup coverage for user parsing, candidate ordering, the me/none default
+  flip, request payloads and Embark target handling
+
 * [[0.2.0]] - 2026-07-15
 
 ** Added

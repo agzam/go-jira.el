@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Ag Ibragimov
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "29.1") (consult "1.0") (s "1.13.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -34,6 +34,7 @@
 
 (require 'go-jira-edit)
 (require 'go-jira-status)
+(require 'go-jira-assign)
 
 (defgroup go-jira nil
   "Emacs interface to go-jira CLI tool."
@@ -379,6 +380,7 @@ becomes SAC-28812__add_new_metadata_tap-asana"
     (define-key map (kbd "C-c C-o") #'go-jira-view-mode-open-browser)
     (define-key map (kbd "C-c M-r") #'go-jira-view-mode-refresh)
     (define-key map (kbd "C-c C-s") #'go-jira-change-status)
+    (define-key map (kbd "C-c C-a") #'go-jira-assign)
     (define-key map (kbd "C-c M-q") #'kill-buffer-and-window)
     map)
   "Keymap for `go-jira-view-mode'.")

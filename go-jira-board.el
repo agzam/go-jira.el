@@ -1,7 +1,7 @@
 ;;; go-jira-board.el --- Jira board browsing for go-jira -*- lexical-binding: t; -*-
 ;; Copyright (C) 2024 Ag Ibragimov
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -361,6 +361,7 @@ Returns an alist of (column-name . (issue-list))."
     (define-key map (kbd "C-c M-y") #'go-jira-board-view-copy-url)
     (define-key map (kbd "C-c M-r") #'go-jira-board-refresh)
     (define-key map (kbd "C-c C-s") #'go-jira-change-status)
+    (define-key map (kbd "C-c C-a") #'go-jira-assign)
     (define-key map (kbd "C-c M-q") #'quit-window)
     map)
   "Keymap for go-jira-board-view-mode.")
