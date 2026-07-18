@@ -86,5 +86,14 @@ Shows description of a ticket when cursor is at point of a text matching Jira ti
 
 - in TUI, instead of the popup there's an option - ~go-jira-eldoc-mode~
 
+*** ~go-jira-popup-show~ 
+
+Explicitly pops the description for the ticket under the cursor. Unlike
+~go-jira-popup-mode~, it doesn't wait for the idle delay, doesn't require normal
+state, and works even when the mode isn't enabled - handy when the automatic
+popup didn't trigger. Dismiss it with ~go-jira-popup-hide~ (or, with
+~go-jira-popup-mode~ on, by moving off the ticket). Falls back to the echo area
+when posframe isn't available.
+
 *** Embark integration 
 Adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.

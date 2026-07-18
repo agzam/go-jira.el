@@ -8,6 +8,21 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+** Added
+- =go-jira-popup-show=: explicitly display the hover popup for the ticket at
+  point, bypassing the idle delay and normal-state gating so it works even when
+  =go-jira-popup-mode= is off; =go-jira-popup-hide= dismisses it
+
+** Fixed
+- Popup no longer vanishes moments after appearing: its teardown moved off the
+  global =buffer-list-update-hook= (which also fired for the throwaway buffers
+  other code creates) onto =window-selection-change-functions= and
+  =window-buffer-change-functions=, so it only closes on real window/buffer/tab
+  switches
+- Popup now appears reliably when point shifts within a ticket during the idle
+  delay: the debounced fetch re-checks the ticket at point rather than a
+  captured buffer position
+
 * [[0.3.0]] - 2026-07-16
 
 ** Added
