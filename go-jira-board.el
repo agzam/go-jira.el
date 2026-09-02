@@ -1,7 +1,7 @@
 ;;; go-jira-board.el --- Jira board browsing for go-jira -*- lexical-binding: t; -*-
 ;; Copyright (C) 2024 Ag Ibragimov
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.3.0
+;; Version: 0.4.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -14,6 +14,7 @@
 (require 'json)
 (require 'consult)
 (require 'go-jira)
+(require 'go-jira-comment)
 (require 'go-jira-markup)
 (require 'go-jira-edit)
 
@@ -355,6 +356,8 @@ Returns an alist of (column-name . (issue-list))."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET") #'go-jira-board-view-issue)
     (define-key map (kbd "C-c M-e") #'go-jira-edit)
+    (define-key map (kbd "C-c M-c") #'go-jira-comment-add)
+    (define-key map (kbd "C-c C-r") #'go-jira-comment-reply)
     (define-key map (kbd "C-c C-o") #'go-jira-board-browse-issue-url)
     (define-key map (kbd "C-c C-y") #'go-jira-board-view-copy-issue-url)
     (define-key map (kbd "C-c M-o") #'go-jira-board-view-open-browser)
@@ -528,29 +531,17 @@ SUBTASKS and LINKED-ITEMS are optional strings.  DETAILS is a plist with
                            (body (gethash 'body comment))
                            (comment-id (gethash 'id comment)))
                       (when body
-                        (let* ((timestamp (when created
-                                            (condition-case nil
-                                                (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
-                                              (error created))))
-                               (timestamp-link (if (and comment-id base-url)
-                                                   (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
-                                                           base-url comment-id comment-id timestamp)
-                                                 timestamp))
-                               (heading-start (point)))
-                          (insert (format "%s %s - %s\n"
-                                          (make-string level ?*)
-                                          (or author-name "Unknown")
-                                          (or timestamp-link timestamp "")))
-                          (when is-reply
-                            (let ((pid (gethash (format "%s" comment-id) parent-map)))
-                              (insert (format ":PROPERTIES:\n:JIRA_PARENT_ID: %s\n:END:\n"
-                                              (or pid "")))))
-                          (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
-                              (let ((converted (go-jira-markup-to-org body)))
-                                (when converted
-                                  (insert (go-jira--adjust-heading-levels converted level))))
-                            (insert body))
-                          (insert "\n")))))))  ;; close let* timestamp, when body, let* author, dolist entry, let threaded, when comments
+                        (go-jira-comment-insert-heading
+                         level author-name created comment-id
+                         (when is-reply
+                           (gethash (format "%s" comment-id) parent-map))
+                         base-url)
+                        (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
+                            (let ((converted (go-jira-markup-to-org body)))
+                              (when converted
+                                (insert (go-jira--adjust-heading-levels converted level))))
+                          (insert body))
+                        (insert "\n"))))))  ;; close when body, let* author, dolist entry, let threaded, when comments
 
               (unless (looking-at-p "^\\s-*$")
                 (insert "\n"))))  ;; close unless, let attachment-map, let inhibit-read-only

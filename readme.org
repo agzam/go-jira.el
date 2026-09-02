@@ -38,12 +38,22 @@ Main buffer for ticket overview. Shows the ticket description, subtasks, linked 
 | Key     | Command                        | Description                         |
 |---------+--------------------------------+-------------------------------------|
 | C-c M-e | go-jira-edit                   | Edit title, description or comments |
+| C-c M-c | go-jira-comment-add            | Write a new comment                 |
+| C-c C-r | go-jira-comment-reply          | Reply to the comment at point       |
 | C-C C-y | go-jira-view-mode-copy-url     | Copy ticket url                     |
 | C-c C-o | go-jira-view-mode-open-browser | Open ticket in the browser          |
 | C-c M-r | go-jira-view-mode-refresh      | Pull ticket data from Jira          |
 | C-c C-s | go-jira-change-status          | Change the ticket status            |
 | C-c C-a | go-jira-assign                 | Assign the ticket to a user         |
 | C-c M-q | kill-buffer-and-window         |                                     |
+
+*** Comments
+
+Editing a comment in place and submitting with ~C-c C-c~ amends it in Jira. Each comment heading carries its Jira ID in a property drawer, which is how the package tells one comment from another - the heading itself is yours to rewrite.
+
+~go-jira-edit~ reads where the cursor is. On a comment it edits that comment. On the ~Comments~ heading it drafts a new one, since that is the only spot in a ticket with nothing else to edit. Everywhere else it opens the usual edit session.
+
+Replies are sub-headings marked with a ~JIRA_PARENT_ID~ property. Use ~go-jira-comment-reply~ to create one; a sub-heading you type yourself is treated as part of the comment body, because Jira comments may contain headings of their own.
 
 *** ~go-jira-display-board~
 
@@ -53,6 +63,8 @@ Consult picker that allows you to find a board and display the list of tickets o
 |---------+-----------------------------------+------------------------------------------------------------|
 | RET     | go-jira-board-view-issue          | View ticket at point in a separate buffer                  |
 | C-c M-e | go-jira-edit                      | Edit title, description or comments of the ticket at point |
+| C-c M-c | go-jira-comment-add               | Write a new comment on the ticket at point                 |
+| C-c C-r | go-jira-comment-reply             | Reply to the comment at point                              |
 | C-c C-y | go-jira-board-view-copy-issue-url | Copy url of the ticket at point                            |
 | C-c C-o | go-jira-board-browse-issue-url    | Open ticket at point in the browser                        |
 | C-c M-o | go-jira-board-view-open-browser   | Open board URL in browser                                  |
@@ -97,3 +109,5 @@ when posframe isn't available.
 
 *** Embark integration 
 Adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.
+
+~embark-act~ then ~j c~ on a ticket key opens the ticket and drops you into a comment draft, so commenting works the same way from a code buffer as it does from the ticket view.

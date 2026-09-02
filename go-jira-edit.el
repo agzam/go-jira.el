@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Ag Ibragimov
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.3.0
+;; Version: 0.4.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -26,7 +26,9 @@
 
 ;;; Code:
 
+(require 'go-jira-comment)
 (require 'go-jira-markup)
+(require 'cl-lib)
 (require 'org)
 (require 'json)
 
@@ -61,6 +63,8 @@ indicator is now shown via `header-line-format'.")
     ;; Add our specific bindings
     (define-key map (kbd "C-c C-c") #'go-jira-edit-submit)
     (define-key map (kbd "C-c C-k") #'go-jira-edit-abort)
+    (define-key map (kbd "C-c M-c") #'go-jira-comment-add)
+    (define-key map (kbd "C-c C-r") #'go-jira-comment-reply)
     map)
   "Keymap active in description edit overlay region.
 Inherits from org-mode-map, overrides submit and abort.")
@@ -281,31 +285,27 @@ If buffer is narrowed, uses narrowed bounds instead of absolute positions."
 
 (defun go-jira-edit--extract-comment-body (element heading-level)
   "Extract body text from comment ELEMENT at HEADING-LEVEL.
-Excludes any reply sub-headings (identified by JIRA_PARENT_ID property)
-so that only the comment's own prose is returned.  Heading levels are
-normalised back to root-relative."
-  (let* ((contents-begin (org-element-property :contents-begin element))
+Excludes the property drawer and any reply sub-headings, so that only the
+comment's own prose is returned.  Heading levels are normalised back to
+root-relative."
+  (let* ((body-begin (go-jira-comment-body-start element))
          (contents-end (org-element-property :contents-end element))
          (reply-level (1+ heading-level)))
-    (if (not (and contents-begin contents-end))
+    (if (not (and body-begin contents-end (< body-begin contents-end)))
         ""
-      ;; Walk through contents, collecting text ranges that aren't reply headings
+      ;; Walk through contents, collecting text ranges that aren't replies
       (let (body-parts
-            (pos contents-begin))
+            (pos body-begin))
         (save-excursion
-          (goto-char contents-begin)
+          (goto-char body-begin)
           (while (and (< (point) contents-end)
                       (re-search-forward
                        (format "^\\*\\{%d\\} " reply-level) contents-end t))
             (goto-char (line-beginning-position))
             (let* ((sub-el (org-element-at-point))
                    (sub-begin (org-element-property :begin sub-el))
-                   (sub-end (org-element-property :end sub-el))
-                   ;; Only treat as a reply if it has JIRA_PARENT_ID property
-                   ;; (set by Jira for actual replies). Headings without it are
-                   ;; body content that happens to be at reply-level.
-                   (is-reply (org-entry-get sub-begin "JIRA_PARENT_ID")))
-              (when is-reply
+                   (sub-end (org-element-property :end sub-el)))
+              (when (go-jira-comment-parent-id-at sub-begin)
                 ;; Collect text before this reply
                 (when (< pos sub-begin)
                   (push (buffer-substring pos sub-begin) body-parts))
@@ -321,8 +321,12 @@ normalised back to root-relative."
 (defun go-jira-edit--extract-comments (&optional context)
   "Extract comments (including replies) from the ticket.
 CONTEXT is a plist with ticket bounds.  If nil, uses current context.
-Returns a list of plists with :body, optionally :id for existing comments,
-and :parent-id for reply comments."
+Returns a list of plists with :body, :marker at the comment's heading,
+optionally :id for existing comments, and :parent-id for replies.
+
+A sub-heading counts as a reply only when it carries the parent property.
+Jira comment bodies may themselves contain headings, and position alone
+cannot tell the two apart."
   (let* ((ctx (or context (go-jira-edit--get-ticket-context)))
          (start (plist-get ctx :start))
          (end (plist-get ctx :end))
@@ -330,8 +334,7 @@ and :parent-id for reply comments."
          (comments-level (+ level 1))  ; Comments heading is one level below ticket
          (comment-level (+ level 2))   ; Individual comments are two levels below ticket
          (reply-level (+ level 3))     ; Reply comments are three levels below ticket
-         comments
-         current-parent-id)
+         comments)
     (save-excursion
       (save-restriction
         (widen)
@@ -352,45 +355,122 @@ and :parent-id for reply comments."
               (goto-char (line-beginning-position))
               (let* ((comment-element (org-element-at-point))
                      (el-level (org-element-property :level comment-element))
-                     (heading-text (org-element-property :raw-value comment-element))
-                     (comment-id (when (string-match "focusedCommentId=\\([0-9]+\\)" heading-text)
-                                   (match-string 1 heading-text)))
-                     (is-new (not comment-id)))
+                     (comment-id (go-jira-comment-id-at))
+                     (parent-id (go-jira-comment-parent-id-at)))
 
                 (cond
                  ;; Parent comment (at comment-level)
                  ((= el-level comment-level)
-                  (setq current-parent-id comment-id)
                   (let ((body (go-jira-edit--extract-comment-body comment-element comment-level)))
-                    (when (and (not (string-empty-p body))
-                               (or is-new comment-id))
-                      (push (list :body body :id comment-id) comments)))
-                  (goto-char (org-element-property :contents-begin comment-element)))
+                    (unless (string-empty-p body)
+                      (push (list :body body :id comment-id :marker (point-marker))
+                            comments)))
+                  ;; Descend to look for replies; an empty comment has none.
+                  (goto-char (or (org-element-property :contents-begin comment-element)
+                                 (org-element-property :end comment-element))))
 
-                 ;; Reply comment (at reply-level)
-                 ((= el-level reply-level)
-                  (let* ((parent-id-prop (org-entry-get (point) "JIRA_PARENT_ID"))
-                         (parent-id (or parent-id-prop
-                                        (and current-parent-id
-                                             (format "%s" current-parent-id))))
-                         (contents-begin (org-element-property :contents-begin comment-element))
+                 ;; Reply (at reply-level, and only with a parent recorded)
+                 ((and (= el-level reply-level) parent-id)
+                  (let* ((body-begin (go-jira-comment-body-start comment-element))
                          (contents-end (org-element-property :contents-end comment-element))
-                         (body (if (and contents-begin contents-end)
+                         (body (if (and body-begin contents-end (< body-begin contents-end))
                                    (go-jira-markup-shift-headings
-                                    (string-trim (buffer-substring contents-begin contents-end))
+                                    (string-trim (buffer-substring body-begin contents-end))
                                     (- reply-level))
                                  "")))
-                    ;; Only include if it looks like a reply (has property, ID, or parent context)
-                    (when (and (not (string-empty-p body))
-                               (or comment-id parent-id-prop
-                                   ;; new reply: user-added heading under a parent
-                                   current-parent-id))
-                      (push (list :body body :id comment-id :parent-id parent-id) comments)))
+                    (unless (string-empty-p body)
+                      (push (list :body body :id comment-id :parent-id parent-id
+                                  :marker (point-marker))
+                            comments)))
                   (goto-char (org-element-property :end comment-element)))
 
-                 ;; Something else - skip
+                 ;; A heading inside a comment body - already part of that body
                  (t (goto-char (org-element-property :end comment-element))))))))))
     (nreverse comments)))
+
+;;; Drafting new comments
+
+(defun go-jira-edit--ensure-jira-buffer ()
+  "Signal unless the current buffer shows a Jira ticket."
+  (unless (or (derived-mode-p 'go-jira-view-mode)
+              (derived-mode-p 'go-jira-board-view-mode))
+    (user-error "Not in a Jira buffer")))
+
+(defun go-jira-edit--ensure-session ()
+  "Start an edit session unless one is already running."
+  (unless go-jira-edit--active-overlay
+    (let ((context (go-jira-edit--get-ticket-context)))
+      (unless (plist-get context :key)
+        (user-error "Could not determine ticket key"))
+      (go-jira-edit--create-overlay context))))
+
+(defun go-jira-edit--at-comments-heading-p (&optional context)
+  "Return non-nil when point sits on the ticket's Comments heading.
+CONTEXT defaults to the current ticket context."
+  (let ((comments-level (1+ (plist-get (or context (go-jira-edit--get-ticket-context))
+                                       :level))))
+    (save-excursion
+      (when (ignore-errors (org-back-to-heading t) t)
+        (string-match-p
+         (format "\\`\\*\\{%d\\} Comments[ \t]*\\'" comments-level)
+         (buffer-substring-no-properties
+          (line-beginning-position) (line-end-position)))))))
+
+(defun go-jira-edit--comments-section-start (context)
+  "Return the position just after the Comments heading of CONTEXT's ticket.
+Creates the section at the end of the ticket when it has none, which is
+the case for a ticket nobody has commented on yet."
+  (let* ((start (plist-get context :start))
+         (end (plist-get context :end))
+         (comments-level (1+ (plist-get context :level))))
+    (goto-char (go-jira-edit--ticket-heading-start start))
+    (if (re-search-forward
+         (format "^\\*\\{%d\\} Comments[ \t]*$" comments-level) end t)
+        (progn (forward-line 1) (point))
+      (goto-char end)
+      (skip-chars-backward " \t\n" start)
+      (unless (bolp) (insert "\n"))
+      (insert (format "%s Comments\n" (make-string comments-level ?*)))
+      (point))))
+
+(defun go-jira-edit--draft-comment (context)
+  "Insert a comment draft at the top of CONTEXT's Comments section.
+Newest first, matching the order the renderer uses."
+  (goto-char (go-jira-edit--comments-section-start context))
+  (go-jira-comment-insert-draft (+ (plist-get context :level) 2)))
+
+(defun go-jira-edit--draft-reply (context parent-id)
+  "Insert a reply draft to PARENT-ID at the end of its thread in CONTEXT."
+  (unless (go-jira-comment-goto-id parent-id (plist-get context :end))
+    (user-error "Comment %s is no longer in this buffer" parent-id))
+  (org-end-of-subtree t t)
+  (go-jira-comment-insert-draft (+ (plist-get context :level) 3) parent-id))
+
+;;;###autoload
+(defun go-jira-comment-add ()
+  "Draft a new comment on the current Jira issue.
+Creates the Comments section when the ticket has none, starts an edit
+session if one is not already running, and leaves point in the draft.
+Submit it with \\[go-jira-edit-submit]."
+  (interactive)
+  (go-jira-edit--ensure-jira-buffer)
+  (go-jira-edit--ensure-session)
+  (go-jira-edit--draft-comment (go-jira-edit--get-ticket-context))
+  (message "Write the comment, then C-c C-c to submit"))
+
+;;;###autoload
+(defun go-jira-comment-reply ()
+  "Draft a reply to the Jira comment at point.
+The parent is recorded in a property drawer, which is the only thing that
+separates a reply from a heading written inside a comment body."
+  (interactive)
+  (go-jira-edit--ensure-jira-buffer)
+  (let ((parent-id (go-jira-comment-thread-root-id)))
+    (unless parent-id
+      (user-error "No comment at point to reply to"))
+    (go-jira-edit--ensure-session)
+    (go-jira-edit--draft-reply (go-jira-edit--get-ticket-context) parent-id)
+    (message "Write the reply, then C-c C-c to submit")))
 
 ;;; Public API
 
@@ -398,24 +478,45 @@ and :parent-id for reply comments."
 (defun go-jira-edit ()
   "Edit the current Jira issue (title, description, comments).
 Works in both go-jira-view-mode and go-jira-board-view-mode.
-Creates an overlay with submit/abort controls."
+On the Comments heading it also drafts a new comment, since that is the
+only place in a ticket where there is nothing else to edit."
   (interactive)
-  (unless (or (derived-mode-p 'go-jira-view-mode)
-              (derived-mode-p 'go-jira-board-view-mode))
-    (user-error "Not in a Jira buffer"))
+  (go-jira-edit--ensure-jira-buffer)
 
   (when go-jira-edit--active-overlay
     (user-error "Already editing"))
 
-  (let ((context (go-jira-edit--get-ticket-context)))
-    (unless (plist-get context :key)
-      (user-error "Could not determine ticket key"))
+  (if (go-jira-edit--at-comments-heading-p)
+      (go-jira-comment-add)
+    (go-jira-edit--ensure-session)))
 
-    ;; Create the edit overlay
-    (go-jira-edit--create-overlay context)))
+(defun go-jira-edit--comment-changed-p (comment originals)
+  "Return non-nil when COMMENT has to be sent to Jira.
+ORIGINALS are the comments captured when the edit session started.  A
+comment with no ID is new.  One with an ID goes only when its body
+differs, matched by ID rather than by position."
+  (let ((id (plist-get comment :id)))
+    (or (null id)
+        (let ((orig (cl-find-if (lambda (c) (equal (plist-get c :id) id))
+                                originals)))
+          (or (null orig)
+              (not (string-equal (plist-get orig :body)
+                                 (plist-get comment :body))))))))
+
+(defun go-jira-edit--submit-comment (ticket-key comment)
+  "Send COMMENT to Jira for TICKET-KEY.
+Records the ID Jira assigns to a new comment on its heading, so that a
+later edit amends it rather than posting a copy."
+  (let ((body (go-jira-markup-from-org (plist-get comment :body)))
+        (id (plist-get comment :id)))
+    (if id
+        (go-jira-comment-put ticket-key id body)
+      (go-jira-comment-record-id
+       (plist-get comment :marker)
+       (go-jira-comment-post ticket-key body (plist-get comment :parent-id))))))
 
 (defun go-jira-edit-submit ()
-  "Submit the edited title and description to Jira."
+  "Submit the edited title, description and comments to Jira."
   (interactive)
   (unless go-jira-edit--active-overlay
     (user-error "No active edit to submit"))
@@ -425,11 +526,14 @@ Creates an overlay with submit/abort controls."
     (message "DEBUG: buffer-modified-p=%s, narrowed=%s"
              (buffer-modified-p) (buffer-narrowed-p)))
 
-  (unless (go-jira-edit--has-changes-p)
-    (go-jira-edit--remove-overlay)
-    (message "No changes to submit")
-    (cl-return-from go-jira-edit-submit))
+  (if (not (go-jira-edit--has-changes-p))
+      (progn
+        (go-jira-edit--remove-overlay)
+        (message "No changes to submit"))
+    (go-jira-edit--submit-changes)))
 
+(defun go-jira-edit--submit-changes ()
+  "Send the edited title, description and comments of the active session."
   (let* ((ticket-key (overlay-get go-jira-edit--active-overlay 'go-jira-ticket))
          ;; Get original values
          (orig-title (overlay-get go-jira-edit--active-overlay 'original-title))
@@ -458,16 +562,9 @@ Creates an overlay with submit/abort controls."
               (message "DEBUG: orig-comments=%S, current-comments=%S"
                        orig-comments comments-current)))
          ;; Filter to only changed comments
-         (comments (cl-remove-if
+         (comments (cl-remove-if-not
                     (lambda (comment)
-                      (let* ((id (plist-get comment :id))
-                             (body (plist-get comment :body))
-                             (orig (cl-find-if (lambda (c)
-                                                 (equal (plist-get c :id) id))
-                                               orig-comments)))
-                        ;; Keep if: new (no id) OR body changed
-                        (and orig  ; Has original (not new)
-                             (string-equal (plist-get orig :body) body))))  ; Body unchanged
+                      (go-jira-edit--comment-changed-p comment orig-comments))
                     comments-current))
          (comments-changed (> (length comments) 0))
          ;; Convert to Jira format
@@ -529,61 +626,17 @@ Creates an overlay with submit/abort controls."
                 (message "[Submitting %d comment operations...]" (length comments)))
               (dolist (comment comments)
                 (setq request-count (1+ request-count))
-                (let* ((body (plist-get comment :body))
-                       (id (plist-get comment :id))
-                       (parent-id (plist-get comment :parent-id))
-                       (jira-body (go-jira-markup-from-org body)))
-
-                  (cond
-                   ;; New reply - POST directly to the comment endpoint with parentId
-                   ((and (not id) parent-id)
-                    (let* ((payload (json-encode `(:body ,jira-body
-                                                   :parentId ,(string-to-number parent-id))))
-                           (endpoint (format "rest/api/2/issue/%s/comment" ticket-key)))
-                      (when go-jira-debug
-                        (message "[Request %d] Adding reply (parent:%s)..." request-count parent-id))
-                      (with-temp-buffer
-                        (let ((exit-code (call-process j nil (current-buffer) nil
-                                                       "request" endpoint payload
-                                                       "--method" "POST")))
-                          (let ((result (buffer-string)))
-                            (when (or (not (zerop exit-code))
-                                      (string-match-p "\"errorMessages\"" result))
-                              (setq success nil)
-                              (message "Failed to add reply: %s" result)))))))
-
-                   ;; Existing comment (edit) or new top-level comment (add)
-                   (t
-                    (let* ((comment-op (if id
-                                           (list :edit (list :id id :body jira-body))
-                                         (list :add (list :body jira-body))))
-                           (comment-json (json-encode
-                                          (list :update (list :comment (vector comment-op))))))
-
-                      (with-temp-file json-file
-                        (insert comment-json))
-
-                      (when go-jira-debug
-                        (message "[Request %d] %s comment (id:%s)..."
-                                 request-count
-                                 (if id "Editing" "Adding")
-                                 (or id "new")))
-
-                      (with-temp-file editor-script
-                        (insert "#!/bin/bash\n")
-                        (insert (format "cat %s > \"$1\"\n" (shell-quote-argument json-file))))
-                      (set-file-modes editor-script #o755)
-
-                      (with-temp-buffer
-                        (let ((exit-code (call-process j nil (current-buffer) nil
-                                                       "edit" ticket-key
-                                                       "--editor" editor-script
-                                                       "--template" "json")))
-                          (let ((result (buffer-string)))
-                            (when (or (not (zerop exit-code))
-                                      (string-match-p "error\\|failed" (downcase result)))
-                              (setq success nil)
-                              (message "Failed to update comment: %s" result)))))))))))
+                (when go-jira-debug
+                  (message "[Request %d] %s comment (id:%s parent:%s)..."
+                           request-count
+                           (if (plist-get comment :id) "Editing" "Adding")
+                           (or (plist-get comment :id) "new")
+                           (or (plist-get comment :parent-id) "none")))
+                (condition-case err
+                    (go-jira-edit--submit-comment ticket-key comment)
+                  (error
+                   (setq success nil)
+                   (message "%s" (error-message-string err))))))
 
 
 
