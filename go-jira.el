@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Ag Ibragimov
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.3.0
+;; Version: 0.4.0
 ;; Package-Requires: ((emacs "29.1") (consult "1.0") (s "1.13.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -32,6 +32,7 @@
 (require 'markdown-mode)
 (require 's)
 
+(require 'go-jira-comment)
 (require 'go-jira-edit)
 (require 'go-jira-status)
 (require 'go-jira-assign)
@@ -376,6 +377,8 @@ becomes SAC-28812__add_new_metadata_tap-asana"
 (defvar go-jira-view-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c M-e") #'go-jira-edit)
+    (define-key map (kbd "C-c M-c") #'go-jira-comment-add)
+    (define-key map (kbd "C-c C-r") #'go-jira-comment-reply)
     (define-key map (kbd "C-c C-y") #'go-jira-view-mode-copy-url)
     (define-key map (kbd "C-c C-o") #'go-jira-view-mode-open-browser)
     (define-key map (kbd "C-c M-r") #'go-jira-view-mode-refresh)
@@ -513,7 +516,6 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                     (let* ((comment (car entry))
                            (is-reply (cdr entry))
                            (level (if is-reply 4 3))
-                           (stars (make-string level ?*))
                            (author (gethash 'author comment))
                            (author-name (when author (gethash 'displayName author)))
                            (author-id (when author (gethash 'accountId author)))
@@ -521,34 +523,21 @@ becomes SAC-28812__add_new_metadata_tap-asana"
                            (body (gethash 'body comment))
                            (comment-id (gethash 'id comment)))
                       (when body
-                        (let* ((timestamp (when created
-                                            (condition-case nil
-                                                (format-time-string "[%Y-%m-%d %a %H:%M]" (date-to-time created))
-                                              (error created))))
-                               (timestamp-link (if (and comment-id base-url)
-                                                   (format "[[%s?focusedCommentId=%s&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-%s][%s]]"
-                                                           base-url comment-id comment-id timestamp)
-                                                 timestamp))
-                               (heading-start (point)))
-                          (insert (format "%s %s - %s\n"
-                                          stars
-                                          (or author-name "Unknown")
-                                          (or timestamp-link timestamp "")))
+                        (let ((heading-start
+                               (go-jira-comment-insert-heading
+                                level author-name created comment-id
+                                (when is-reply
+                                  (gethash (format "%s" comment-id) parent-map))
+                                base-url)))
                           ;; Store author ID as text property on the heading
                           (when author-id
-                            (put-text-property heading-start (point) 'jira-comment-author author-id))
-                          ;; Mark replies with an org property so edit-mode can
-                          ;; distinguish them from body headings at the same level.
-                          (when is-reply
-                            (let ((parent-id (gethash (format "%s" comment-id) parent-map)))
-                              (insert (format ":PROPERTIES:\n:JIRA_PARENT_ID: %s\n:END:\n"
-                                              (or parent-id "")))))
-                          ;; Only convert if body has markup
-                          (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
-                              (insert (go-jira-markup-shift-headings
-                                       (go-jira-markup-to-org body) level))
-                            (insert body))
-                          (insert "\n\n"))))))))
+                            (put-text-property heading-start (point) 'jira-comment-author author-id)))
+                        ;; Only convert if body has markup
+                        (if (string-match-p "[{*_#+h-]\\|\\[\\[" body)
+                            (insert (go-jira-markup-shift-headings
+                                     (go-jira-markup-to-org body) level))
+                          (insert body))
+                        (insert "\n\n")))))))
             (go-jira-view-mode)
             (put 'go-jira--ticket-number 'permanent-local t)
             (setq-local go-jira--ticket-number ticket)

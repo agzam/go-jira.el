@@ -8,12 +8,33 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+* [[0.4.0]] - 2026-09-02
+
 ** Added
+- =go-jira-comment-add= (=C-c M-c=): draft a comment on the ticket at point,
+  creating the =Comments= section when the ticket has none. Also reachable from
+  Embark on a ticket key anywhere, via =j c=
+- =go-jira-comment-reply= (=C-c C-r=): draft a reply to the comment at point,
+  recording the parent so the reply is unambiguous
+- =go-jira-edit= now drafts a new comment when point is on the =Comments=
+  heading, and behaves as before everywhere else
 - =go-jira-popup-show=: explicitly display the hover popup for the ticket at
   point, bypassing the idle delay and normal-state gating so it works even when
   =go-jira-popup-mode= is off; =go-jira-popup-hide= dismisses it
 
 ** Fixed
+- Editing a comment no longer posts a duplicate. Every comment heading now
+  carries its Jira ID in a property drawer instead of only inside the
+  =focusedCommentId= link, so the ID survives editing the heading, a ticket with
+  no timestamps, and a board render with no base URL. A comment added from Emacs
+  has Jira's ID written back immediately
+- A heading inside a comment body is no longer posted a second time as a reply.
+  A sub-heading counts as a reply only when it carries =JIRA_PARENT_ID=
+- Editing a reply no longer sends its =:PROPERTIES:= drawer to Jira as prose
+- Extracting a comment with an empty body no longer errors
+- A comment whose text contains the word "error" no longer reports a failed
+  submit; failure is now read off Jira's response rather than matched in it
+- The timestamp link in a comment heading no longer leaves a stray =]= behind
 - Popup no longer vanishes moments after appearing: its teardown moved off the
   global =buffer-list-update-hook= (which also fired for the throwaway buffers
   other code creates) onto =window-selection-change-functions= and
