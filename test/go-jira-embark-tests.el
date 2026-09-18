@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'buttercup)
+(require 'cl-lib)
 (require 'embark)
 (require 'org)
 
@@ -38,10 +39,29 @@
       (goto-char (point-min))
       (expect (go-jira-embark-target-ticket-at-point) :to-be nil))))
 
+(describe "go-jira-embark-copy-ticket-url"
+  (it "kills the resolved URL and echoes nothing but the URL"
+    (let ((kill-ring nil)
+          echoed)
+      (cl-letf (((symbol-function 'go-jira-ticket->url)
+                 (lambda (ticket)
+                   (format "https://example.atlassian.net/browse/%s" ticket)))
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        (go-jira-embark-copy-ticket-url "SAC-30264"))
+      (expect (car kill-ring)
+              :to-equal "https://example.atlassian.net/browse/SAC-30264")
+      (expect echoed
+              :to-equal "https://example.atlassian.net/browse/SAC-30264"))))
+
 (describe "go-jira-embark-jira-ticket-map"
   (it "binds j c to the comment action"
     (expect (keymap-lookup go-jira-embark-jira-ticket-map "j c")
             :to-be #'go-jira-embark-comment-on-ticket))
+
+  (it "binds j l to the copy-URL action"
+    (expect (keymap-lookup go-jira-embark-jira-ticket-map "j l")
+            :to-be #'go-jira-embark-copy-ticket-url))
 
   (it "keeps other bindings under an existing j prefix"
     ;; The package binds into `j' with `keymap-set', which merges; a user

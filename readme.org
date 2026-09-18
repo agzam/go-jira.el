@@ -111,3 +111,5 @@ when posframe isn't available.
 Adds Embark target so you can immediately start browsing the ticket info once cursor is on a ticket number.
 
 ~embark-act~ then ~j c~ on a ticket key opens the ticket and drops you into a comment draft, so commenting works the same way from a code buffer as it does from the ticket view.
+
+~embark-act~ then ~j l~ puts the ticket's browse URL on the kill ring and echoes it.
