@@ -8,6 +8,8 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+* [[0.6.0]] - 2026-10-19
+
 ** Changed
 - =C-c C-o= opens what point is on, the same way in the ticket view and on a board: a link the way Org opens it, a ticket key as that ticket, a comment or reply as itself (a heading in its body included), anything else in a ticket as the ticket, and the rest of a board as the board. =C-c C-y= copies the same URL. Both keys keep working during an edit session
 
