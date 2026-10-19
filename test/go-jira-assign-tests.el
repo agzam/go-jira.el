@@ -123,9 +123,16 @@ ACCOUNT-ID, DISPLAY-NAME and EMAIL mirror the fields the API returns."
             :not :to-equal (go-jira--assignee-color "Ben Allred"))))
 
 (defun go-jira-assign-tests--display (graphic svg)
-  "Make the frame GRAPHIC and SVG support available for the current spec."
+  "Make the frame GRAPHIC and SVG support available for the current spec.
+`svg-image' is faked as well, so the specs also run on Emacs builds without
+librsvg, whose `create-image' rejects the svg type."
   (spy-on 'display-graphic-p :and-return-value graphic)
-  (spy-on 'image-type-available-p :and-return-value svg))
+  (spy-on 'image-type-available-p :and-return-value svg)
+  (spy-on 'svg-image :and-call-fake
+          (lambda (dom &rest props)
+            (append (list 'image :type 'svg
+                          :data (with-temp-buffer (svg-print dom) (buffer-string)))
+                    props))))
 
 (describe "go-jira--assignee-badge"
   (it "draws the initials on the assignee's color as an SVG label"

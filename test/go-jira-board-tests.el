@@ -104,7 +104,8 @@
 (describe "go-jira--insert-issue assignee badge"
   (before-each
     (spy-on 'display-graphic-p :and-return-value t)
-    (spy-on 'image-type-available-p :and-return-value t))
+    (spy-on 'image-type-available-p :and-return-value t)
+    (spy-on 'svg-image :and-return-value '(image :type svg)))
 
   (it "shows the assignee's initials after the key, outside the heading text"
     (with-temp-buffer
