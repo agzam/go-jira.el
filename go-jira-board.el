@@ -18,6 +18,7 @@
 (require 'go-jira-comment)
 (require 'go-jira-markup)
 (require 'go-jira-edit)
+(require 'go-jira-url)
 
 
 (defcustom go-jira-default-project "SAC"
@@ -362,10 +363,8 @@ Returns an alist of (column-name . (issue-list))."
     (define-key map (kbd "C-c M-e") #'go-jira-edit)
     (define-key map (kbd "C-c M-c") #'go-jira-comment-add)
     (define-key map (kbd "C-c C-r") #'go-jira-comment-reply)
-    (define-key map (kbd "C-c C-o") #'go-jira-board-browse-issue-url)
-    (define-key map (kbd "C-c C-y") #'go-jira-board-view-copy-issue-url)
-    (define-key map (kbd "C-c M-o") #'go-jira-board-view-open-browser)
-    (define-key map (kbd "C-c M-y") #'go-jira-board-view-copy-url)
+    (define-key map (kbd "C-c C-o") #'go-jira-open-at-point)
+    (define-key map (kbd "C-c C-y") #'go-jira-copy-url-at-point)
     (define-key map (kbd "C-c M-r") #'go-jira-board-refresh)
     (define-key map (kbd "C-c C-s") #'go-jira-change-status)
     (define-key map (kbd "C-c C-a") #'go-jira-assign)
@@ -699,33 +698,10 @@ in the background, and fills in real content when the response arrives."
    '((go-jira--fontify-status-keys)) t))
 
 (defun go-jira-board-view-issue ()
-  "View the Jira issue at point."
+  "View the Jira issue point is in, from its heading or anywhere below it."
   (interactive)
-  (when-let* ((props (org-entry-properties))
-              (key (cdr (assoc "ISSUE_KEY" props))))
+  (when-let* ((key (org-entry-get nil "ISSUE_KEY" t)))
     (go-jira-view-ticket key)))
-
-(defun go-jira-board-browse-issue-url ()
-  "Open the Jira issue at point in browser."
-  (interactive)
-  (when-let* ((props (org-entry-properties))
-              (key (cdr (assoc "ISSUE_KEY" props))))
-    (browse-url (go-jira-ticket->url key))))
-
-(defun go-jira-board-view--issue-key-at-point ()
-  "Return the ISSUE_KEY property for the entry at point, or nil."
-  (when-let* ((props (org-entry-properties))
-              (key (cdr (assoc "ISSUE_KEY" props))))
-    key))
-
-(defun go-jira-board-view-copy-issue-url ()
-  "Copy URL for the Jira issue at point."
-  (interactive)
-  (if-let ((key (go-jira-board-view--issue-key-at-point)))
-      (progn
-        (kill-new (go-jira-ticket->url key))
-        (message "Copied URL for %s" key))
-    (user-error "No issue at point")))
 
 (defun go-jira-board-view--board-url ()
   "Return the browsable URL for the current board."
@@ -734,18 +710,6 @@ in the background, and fills in real content when the response arrives."
         (format "%s/secure/RapidBoard.jspa?rapidView=%d"
                 (go-jira--base-url) board-id))
     (user-error "No board data found in current buffer")))
-
-(defun go-jira-board-view-open-browser ()
-  "Open the current board in browser."
-  (interactive)
-  (browse-url (go-jira-board-view--board-url)))
-
-(defun go-jira-board-view-copy-url ()
-  "Copy URL for the current board."
-  (interactive)
-  (let ((url (go-jira-board-view--board-url)))
-    (kill-new url)
-    (message "Copied board URL: %s" url)))
 
 (defun go-jira-board-refresh ()
   "Refresh the current board view."

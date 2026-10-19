@@ -54,6 +54,7 @@ check-compile: deps
 	--eval "(byte-compile-file \"go-jira-status.el\")" \
 	--eval "(byte-compile-file \"go-jira-assign.el\")" \
 	--eval "(byte-compile-file \"go-jira-comment.el\")" \
+	--eval "(byte-compile-file \"go-jira-url.el\")" \
 	--eval "(byte-compile-file \"go-jira.el\")" \
 	--eval "(byte-compile-file \"go-jira-board.el\")" \
 	--eval "(byte-compile-file \"go-jira-markup.el\")" \

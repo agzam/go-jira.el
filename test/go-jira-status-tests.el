@@ -159,6 +159,37 @@ ID, NAME, TO-NAME and CATEGORY-KEY mirror the fields the API returns."
     (setq exit-code 1 output "")
     (expect (go-jira--apply-transition "SAC-1" "31") :to-throw 'error)))
 
+(defconst go-jira-status-tests--board-comment
+  (concat "* To Do\n"
+          "** SAC-4242: A ticket\n:PROPERTIES:\n:ISSUE_KEY: SAC-4242\n:END:\n"
+          "*** Comments\n"
+          "**** Jane Roe - 2026-10-19 Mon 10:00\n"
+          ":PROPERTIES:\n:JIRA_COMMENT_ID: 1\n:END:\n"
+          "A comment body.\n")
+  "A board ticket with one comment.")
+
+(describe "go-jira--current-ticket"
+  (before-each
+    (spy-on 'go-jira--ticket-arg-or-ticket-at-point :and-return-value "SAC-31337"))
+
+  (it "finds the ticket from inside one of its comments on a board"
+    ;; Only the ticket heading carries ISSUE_KEY, so a comment below it has
+    ;; to inherit the key rather than fall through to the kill ring.
+    (with-temp-buffer
+      (insert go-jira-status-tests--board-comment)
+      (org-mode)
+      (setq-local go-jira--ticket-number nil)
+      (search-backward "A comment body")
+      (expect (go-jira--current-ticket) :to-equal "SAC-4242")))
+
+  (it "falls back to the ticket at point outside every ticket"
+    (with-temp-buffer
+      (insert go-jira-status-tests--board-comment)
+      (org-mode)
+      (setq-local go-jira--ticket-number nil)
+      (goto-char (point-min))
+      (expect (go-jira--current-ticket) :to-equal "SAC-31337"))))
+
 (describe "go-jira--read-issue-key"
   :var (orig-read orig-current captured-default)
   (before-each

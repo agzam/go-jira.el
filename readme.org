@@ -35,17 +35,17 @@ It depends on the type of Jira instance you're trying to access. The package doe
 
 Main buffer for ticket overview. Shows the ticket description, subtasks, linked items and comments, attached images. You can edit title, description, your comments and add new ones.
 
-| Key     | Command                        | Description                         |
-|---------+--------------------------------+-------------------------------------|
-| C-c M-e | go-jira-edit                   | Edit title, description or comments |
-| C-c M-c | go-jira-comment-add            | Write a new comment                 |
-| C-c C-r | go-jira-comment-reply          | Reply to the comment at point       |
-| C-C C-y | go-jira-view-mode-copy-url     | Copy ticket url                     |
-| C-c C-o | go-jira-view-mode-open-browser | Open ticket in the browser          |
-| C-c M-r | go-jira-view-mode-refresh      | Pull ticket data from Jira          |
-| C-c C-s | go-jira-change-status          | Change the ticket status            |
-| C-c C-a | go-jira-assign                 | Assign the ticket to a user         |
-| C-c M-q | kill-buffer-and-window         |                                     |
+| Key     | Command                   | Description                               |
+|---------+---------------------------+-------------------------------------------|
+| C-c M-e | go-jira-edit              | Edit title, description or comments       |
+| C-c M-c | go-jira-comment-add       | Write a new comment                       |
+| C-c C-r | go-jira-comment-reply     | Reply to the comment at point             |
+| C-c C-y | go-jira-copy-url-at-point | Copy the URL C-c C-o would open           |
+| C-c C-o | go-jira-open-at-point     | Open the link, comment or ticket at point |
+| C-c M-r | go-jira-view-mode-refresh | Pull ticket data from Jira                |
+| C-c C-s | go-jira-change-status     | Change the ticket status                  |
+| C-c C-a | go-jira-assign            | Assign the ticket to a user               |
+| C-c M-q | kill-buffer-and-window    |                                           |
 
 *** Comments
 
@@ -55,26 +55,36 @@ Editing a comment in place and submitting with ~C-c C-c~ amends it in Jira. Each
 
 Replies are sub-headings marked with a ~JIRA_PARENT_ID~ property. Use ~go-jira-comment-reply~ to create one; a sub-heading you type yourself is treated as part of the comment body, because Jira comments may contain headings of their own.
 
+*** Opening and copying URLs
+
+~C-c C-o~ opens what the cursor is on, the same way in the ticket view and on a board:
+
+- a link opens the way Org opens links
+- a ticket key opens that ticket
+- inside a comment or a reply, including a heading in its body, it opens that comment or reply
+- anywhere else in a ticket, it opens the ticket
+- on a board outside every ticket - the title or a column heading - it opens the board
+
+~C-c C-y~ copies the same URL instead of opening it.
+
 *** ~go-jira-display-board~
 
 Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline of titles, upon expanding each, individual ticket data loads. Editing works the same way as in view-ticket buffer.
 
 Each ticket heading shows the assignee's initials right after the key, as a small rounded label in a color derived from their name - the same person always gets the same color. The ticket view does the same. Unassigned tickets show no label, and text terminals show none.
   
-| Key     | Command                           | Description                                                |
-|---------+-----------------------------------+------------------------------------------------------------|
-| RET     | go-jira-board-view-issue          | View ticket at point in a separate buffer                  |
-| C-c M-e | go-jira-edit                      | Edit title, description or comments of the ticket at point |
-| C-c M-c | go-jira-comment-add               | Write a new comment on the ticket at point                 |
-| C-c C-r | go-jira-comment-reply             | Reply to the comment at point                              |
-| C-c C-y | go-jira-board-view-copy-issue-url | Copy url of the ticket at point                            |
-| C-c C-o | go-jira-board-browse-issue-url    | Open ticket at point in the browser                        |
-| C-c M-o | go-jira-board-view-open-browser   | Open board URL in browser                                  |
-| C-c M-y | go-jira-board-view-copy-url       | Copy board URL                                             |
-| C-c M-r | go-jira-board-refresh             | Pull board data from Jira                                  |
-| C-c C-s | go-jira-change-status             | Change the status of the ticket at point                   |
-| C-c C-a | go-jira-assign                    | Assign the ticket at point to a user                       |
-| C-c M-q | quit-window                       |                                                            |
+| Key     | Command                   | Description                                                |
+|---------+---------------------------+------------------------------------------------------------|
+| RET     | go-jira-board-view-issue  | View ticket at point in a separate buffer                  |
+| C-c M-e | go-jira-edit              | Edit title, description or comments of the ticket at point |
+| C-c M-c | go-jira-comment-add       | Write a new comment on the ticket at point                 |
+| C-c C-r | go-jira-comment-reply     | Reply to the comment at point                              |
+| C-c C-y | go-jira-copy-url-at-point | Copy the URL C-c C-o would open                            |
+| C-c C-o | go-jira-open-at-point     | Open the link, comment, ticket or board at point           |
+| C-c M-r | go-jira-board-refresh     | Pull board data from Jira                                  |
+| C-c C-s | go-jira-change-status     | Change the status of the ticket at point                   |
+| C-c C-a | go-jira-assign            | Assign the ticket at point to a user                       |
+| C-c M-q | quit-window               |                                                            |
   
 
 *** ~go-jira-browse-default-board~

@@ -260,6 +260,31 @@
       (expect (plist-get board-data :active-sprint-ids) :to-equal '(16727 16963))
       (expect (length (plist-get board-data :columns)) :to-equal 2))))
 
+(describe "go-jira-board-view-issue"
+  (before-each
+    (spy-on 'go-jira-view-ticket))
+
+  (it "views the ticket from inside one of its comments"
+    (with-temp-buffer
+      (insert "* To Do\n"
+              "** SAC-4242: A ticket\n:PROPERTIES:\n:ISSUE_KEY: SAC-4242\n:END:\n"
+              "*** Comments\n"
+              "**** Jane Roe - 2026-10-19 Mon 10:00\n"
+              ":PROPERTIES:\n:JIRA_COMMENT_ID: 1\n:END:\n"
+              "A comment body.\n")
+      (org-mode)
+      (search-backward "A comment body")
+      (go-jira-board-view-issue)
+      (expect 'go-jira-view-ticket :to-have-been-called-with "SAC-4242")))
+
+  (it "does nothing on a column heading"
+    (with-temp-buffer
+      (insert "* To Do\n")
+      (org-mode)
+      (goto-char (point-min))
+      (go-jira-board-view-issue)
+      (expect 'go-jira-view-ticket :not :to-have-been-called))))
+
 ;;; Tests: URL functions for board view
 
 (defconst go-jira-board-test--buffer-content
@@ -314,49 +339,39 @@
       (goto-char (point-min))
       buf)))
 
-(describe "go-jira-board-view--issue-key-at-point"
-  (it "returns issue key when point is on an issue heading"
-    (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (goto-char (point-min))
-      (re-search-forward "SAC-123")
-      (expect (go-jira-board-view--issue-key-at-point) :to-equal "SAC-123")
-      (kill-buffer)))
+(describe "go-jira-board-view-mode-map"
+  (it "opens and copies what point is on with C-c C-o and C-c C-y"
+    (expect (lookup-key go-jira-board-view-mode-map (kbd "C-c C-o"))
+            :to-be 'go-jira-open-at-point)
+    (expect (lookup-key go-jira-board-view-mode-map (kbd "C-c C-y"))
+            :to-be 'go-jira-copy-url-at-point))
 
-  (it "returns issue key for another issue"
-    (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (goto-char (point-min))
-      (re-search-forward "SAC-789")
-      (expect (go-jira-board-view--issue-key-at-point) :to-equal "SAC-789")
-      (kill-buffer)))
+  (it "binds nothing of its own on C-c M-o and C-c M-y"
+    ;; The mode sets the Org parent only when it first runs, so look at the
+    ;; map's own bindings rather than at whatever a parent adds.
+    (let ((own (copy-keymap go-jira-board-view-mode-map)))
+      (set-keymap-parent own nil)
+      (dolist (key '("C-c M-o" "C-c M-y"))
+        (expect (lookup-key own (kbd key)) :to-be nil)))))
 
-  (it "returns nil when point is on a column heading (no ISSUE_KEY property)"
+(describe "go-jira-copy-url-at-point in a board"
+  (before-each
+    (spy-on 'go-jira-ticket->url
+            :and-call-fake (lambda (key) (format "https://example.com/%s" key))))
+
+  (it "copies the board URL from a column heading"
     (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (goto-char (point-min))
       (re-search-forward "^\\* To Do")
-      (expect (go-jira-board-view--issue-key-at-point) :to-equal nil)
+      (go-jira-copy-url-at-point)
+      (expect (car kill-ring)
+              :to-equal "https://example.atlassian.net/secure/RapidBoard.jspa?rapidView=3018")
       (kill-buffer)))
 
-  (it "returns nil when point is on title line"
+  (it "copies the ticket URL from a ticket's drawer"
     (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (goto-char (point-min))
-      (expect (go-jira-board-view--issue-key-at-point) :to-equal nil)
-      (kill-buffer))))
-
-(describe "go-jira-board-view-copy-issue-url"
-  (it "copies the issue URL to kill ring"
-    (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (goto-char (point-min))
-      (re-search-forward "SAC-123")
-      (go-jira-board-view-copy-issue-url)
-      (expect (car kill-ring) :to-equal "https://example.com/SAC-123")
-      (kill-buffer)))
-
-  (it "signals error when no issue at point"
-    (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (goto-char (point-min))
-      (re-search-forward "^\\* To Do")
-      (expect (go-jira-board-view-copy-issue-url)
-              :to-throw 'user-error)
+      (re-search-forward "^:ASSIGNEE: Jane Smith")
+      (go-jira-copy-url-at-point)
+      (expect (car kill-ring) :to-equal "https://example.com/SAC-456")
       (kill-buffer))))
 
 (describe "go-jira-board-view--board-url"
@@ -372,25 +387,6 @@
       (setq major-mode 'go-jira-board-view-mode)
       (expect (go-jira-board-view--board-url)
               :to-throw 'user-error))))
-
-(describe "go-jira-board-view-copy-url"
-  (it "copies the board URL to kill ring"
-    (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (go-jira-board-view-copy-url)
-      (expect (car kill-ring)
-              :to-equal "https://example.atlassian.net/secure/RapidBoard.jspa?rapidView=3018")
-      (kill-buffer))))
-
-(describe "go-jira-board-view-open-browser"
-  (it "calls browse-url with the board URL"
-    (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (let (browsed-url)
-        (cl-letf (((symbol-function 'browse-url)
-                   (lambda (url &rest _) (setq browsed-url url))))
-          (go-jira-board-view-open-browser)
-          (expect browsed-url
-                  :to-equal "https://example.atlassian.net/secure/RapidBoard.jspa?rapidView=3018")))
-      (kill-buffer))))
 
 (describe "go-jira-board-refresh"
   (it "calls go-jira-display-board with force-refresh"
@@ -408,19 +404,6 @@
     (with-temp-buffer
       (expect (go-jira-board-refresh)
               :to-throw 'user-error))))
-
-(describe "go-jira-board-browse-issue-url"
-  (it "calls browse-url with the issue URL"
-    (with-current-buffer (go-jira-board-test--setup-board-buffer)
-      (goto-char (point-min))
-      (re-search-forward "SAC-456")
-      (let (browsed-url)
-        (cl-letf (((symbol-function 'browse-url)
-                   (lambda (url &rest _) (setq browsed-url url))))
-          (go-jira-board-browse-issue-url)
-          (expect browsed-url
-                  :to-equal "https://example.com/SAC-456")))
-      (kill-buffer))))
 
 (provide 'go-jira-board-tests)
 ;;; go-jira-board-tests.el ends here
