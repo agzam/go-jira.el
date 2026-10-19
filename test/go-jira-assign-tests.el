@@ -98,6 +98,90 @@ ACCOUNT-ID, DISPLAY-NAME and EMAIL mirror the fields the API returns."
            (cands (go-jira--assignee-candidates users me nil table)))
       (expect cands :to-equal '("Assign to me" "Ann")))))
 
+(describe "go-jira--initials"
+  (it "takes the first letters of the first and last words"
+    (expect (go-jira--initials "Ag Ibragimov") :to-equal "AI")
+    (expect (go-jira--initials "Mary Ann Smith") :to-equal "MS"))
+
+  (it "splits on punctuation and upcases"
+    (expect (go-jira--initials "jean-luc picard") :to-equal "JP"))
+
+  (it "uses one letter for a one-word name"
+    (expect (go-jira--initials "Prince") :to-equal "P"))
+
+  (it "returns nil for a missing or letterless name"
+    (expect (go-jira--initials nil) :to-be nil)
+    (expect (go-jira--initials "") :to-be nil)
+    (expect (go-jira--initials "42") :to-be nil)))
+
+(describe "go-jira--assignee-color"
+  (it "keeps a person's color fixed, so no change can silently recolor everyone"
+    (expect (go-jira--assignee-color "Ag Ibragimov") :to-equal "#6970bd"))
+
+  (it "gives different people different colors"
+    (expect (go-jira--assignee-color "Ag Ibragimov")
+            :not :to-equal (go-jira--assignee-color "Ben Allred"))))
+
+(defun go-jira-assign-tests--display (graphic svg)
+  "Make the frame GRAPHIC and SVG support available for the current spec.
+`svg-image' is stubbed too: `create-image' rejects svg on builds without it."
+  (spy-on 'display-graphic-p :and-return-value graphic)
+  (spy-on 'image-type-available-p :and-return-value svg)
+  (spy-on 'svg-image :and-return-value '(image :type svg)))
+
+(describe "go-jira--assignee-badge"
+  (it "labels the initials and shows the full name on hover"
+    (go-jira-assign-tests--display t t)
+    (let ((badge (go-jira--assignee-badge "Ag Ibragimov")))
+      (expect (substring-no-properties badge) :to-equal "AI")
+      (expect (get-text-property 0 'help-echo badge) :to-equal "Ag Ibragimov")))
+
+  (it "returns nil for an unassigned issue"
+    (go-jira-assign-tests--display t t)
+    (expect (go-jira--assignee-badge nil) :to-be nil))
+
+  (it "returns nil on a text terminal"
+    (go-jira-assign-tests--display nil t)
+    (expect (go-jira--assignee-badge "Ag Ibragimov") :to-be nil))
+
+  (it "returns nil when Emacs cannot render SVG"
+    (go-jira-assign-tests--display t nil)
+    (expect (go-jira--assignee-badge "Ag Ibragimov") :to-be nil)))
+
+(describe "go-jira--put-assignee-badge"
+  (it "shows the badge after the separator without changing the text"
+    (go-jira-assign-tests--display t t)
+    (with-temp-buffer
+      (insert "** SAC-1: Summary")
+      (go-jira--put-assignee-badge 9 11 "Ag Ibragimov")
+      (let ((ov (car (overlays-in (point-min) (point-max)))))
+        (expect (buffer-string) :to-equal "** SAC-1: Summary")
+        (expect (overlay-end ov) :to-equal 11)
+        (expect (substring-no-properties (overlay-get ov 'after-string))
+                :to-equal "AI "))))
+
+  (it "adds nothing for an unassigned issue"
+    (go-jira-assign-tests--display t t)
+    (with-temp-buffer
+      (insert "** SAC-1: Summary")
+      (go-jira--put-assignee-badge 9 11 nil)
+      (expect (overlays-in (point-min) (point-max)) :to-be nil)))
+
+  (it "adds nothing on a text terminal"
+    (go-jira-assign-tests--display nil t)
+    (with-temp-buffer
+      (insert "** SAC-1: Summary")
+      (go-jira--put-assignee-badge 9 11 "Ag Ibragimov")
+      (expect (overlays-in (point-min) (point-max)) :to-be nil)))
+
+  (it "leaves no badge behind when the buffer is erased for a refresh"
+    (go-jira-assign-tests--display t t)
+    (with-temp-buffer
+      (insert "** SAC-1: Summary")
+      (go-jira--put-assignee-badge 9 11 "Ag Ibragimov")
+      (erase-buffer)
+      (expect (overlays-in (point-min) (point-max)) :to-be nil))))
+
 (describe "go-jira--fetch-assignable-users"
   :var (orig-exe orig-shell)
   (before-each

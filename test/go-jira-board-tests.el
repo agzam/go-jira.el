@@ -36,6 +36,9 @@
   (provide 'go-jira-edit)
   (defun go-jira-edit () nil))
 
+(unless (featurep 'go-jira-status)
+  (load-file "go-jira-status.el"))
+
 (load-file "go-jira-board.el")
 
 (describe "go-jira--parse-board-columns"
@@ -97,6 +100,29 @@
         (expect (plist-get result :priority) :to-equal "High")
         (expect (plist-get result :issuetype) :to-equal "Bug")
         (expect (plist-get result :labels) :to-equal '("backend" "api"))))))
+
+(describe "go-jira--insert-issue assignee badge"
+  (before-each
+    (spy-on 'display-graphic-p :and-return-value t)
+    (spy-on 'image-type-available-p :and-return-value t)
+    (spy-on 'svg-image :and-return-value '(image :type svg)))
+
+  (it "shows the assignee's initials after the key, outside the heading text"
+    (with-temp-buffer
+      (go-jira--insert-issue '(:key "SAC-1" :summary "Fix it" :assignee "Ag Ibragimov"))
+      (goto-char (point-min))
+      (expect (buffer-substring-no-properties (point) (line-end-position))
+              :to-equal "** SAC-1: Fix it")
+      (let ((ov (car (overlays-in (point-min) (point-max)))))
+        (expect (substring-no-properties (overlay-get ov 'after-string))
+                :to-equal "AI ")
+        (expect (overlay-end ov) :to-equal (+ (point) (length "** SAC-1: "))))))
+
+  (it "shows no badge for an unassigned issue"
+    (with-temp-buffer
+      (go-jira--insert-issue '(:key "SAC-2" :summary "Nobody's" :assignee nil))
+      (expect (overlays-in (point-min) (point-max)) :to-be nil)
+      (expect (buffer-string) :to-match ":ASSIGNEE: Unassigned"))))
 
 (describe "go-jira--group-issues-by-column"
   (it "groups issues by column based on status IDs"

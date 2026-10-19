@@ -1,7 +1,7 @@
 ;;; go-jira-board.el --- Jira board browsing for go-jira -*- lexical-binding: t; -*-
 ;; Copyright (C) 2024 Ag Ibragimov
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.4.0
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -14,6 +14,7 @@
 (require 'json)
 (require 'consult)
 (require 'go-jira)
+(require 'go-jira-assign)
 (require 'go-jira-comment)
 (require 'go-jira-markup)
 (require 'go-jira-edit)
@@ -331,7 +332,10 @@ Returns an alist of (column-name . (issue-list))."
       (insert key)
       (put-text-property key-start (point) 'jira-status-key
                          (go-jira--status-face status category-key)))
-    (insert ": " (or summary "") "\n")
+    (let ((sep-start (point)))
+      (insert ": ")
+      (go-jira--put-assignee-badge sep-start (point) (plist-get issue :assignee)))
+    (insert (or summary "") "\n")
     (insert ":PROPERTIES:\n")
     (insert ":ISSUE_KEY: " key "\n")
     (insert ":TODO: " status "\n")

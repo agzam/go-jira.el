@@ -3,7 +3,7 @@
 ;; Copyright (C) 2024 Ag Ibragimov
 
 ;; Author: Ag Ibragimov <agzam.ibragimov@gmail.com>
-;; Version: 0.4.0
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "29.1") (consult "1.0") (s "1.13.1"))
 ;; Keywords: tools, jira
 ;; URL: https://github.com/agzam/go-jira.el
@@ -484,7 +484,10 @@ becomes SAC-28812__add_new_metadata_tap-asana"
               (insert key)
               (put-text-property key-start (point) 'jira-status-key
                                  (go-jira--status-face status-name status-category-key)))
-            (insert ": " (or summary "") "\n")
+            (let ((sep-start (point)))
+              (insert ": ")
+              (go-jira--put-assignee-badge sep-start (point) assignee-name))
+            (insert (or summary "") "\n")
             (insert ":PROPERTIES:\n")
             (insert ":ISSUE_KEY: " key "\n")
             (insert ":TODO: " (or status-name "") "\n")

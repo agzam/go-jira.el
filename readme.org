@@ -58,6 +58,8 @@ Replies are sub-headings marked with a ~JIRA_PARENT_ID~ property. Use ~go-jira-c
 *** ~go-jira-display-board~
 
 Consult picker that allows you to find a board and display the list of tickets on the board. Initially it loads just the outline of titles, upon expanding each, individual ticket data loads. Editing works the same way as in view-ticket buffer.
+
+Each ticket heading shows the assignee's initials right after the key, as a small rounded label in a color derived from their name - the same person always gets the same color. The ticket view does the same. Unassigned tickets show no label, and text terminals show none.
   
 | Key     | Command                           | Description                                                |
 |---------+-----------------------------------+------------------------------------------------------------|

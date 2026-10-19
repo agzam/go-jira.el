@@ -8,10 +8,13 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+* [[0.5.0]] - 2026-10-19
+
 ** Added
 - =go-jira-embark-copy-ticket-url=: resolves the browse URL of the ticket at
   point, puts it on the kill ring and echoes the URL alone. Reachable from
   Embark on a ticket key via =j l=
+- Assignee initials after the issue key in board and ticket view headings, drawn as a small rounded SVG label, e.g. =SAC-123: [AI] Fix the thing=. Each person gets a color derived from their name, so it stays the same across sessions. The label is display only: the heading text, which =go-jira-edit= sends back as the summary, does not change. Unassigned tickets show no label, and text terminals show none at all
 
 * [[0.4.0]] - 2026-09-02
 
