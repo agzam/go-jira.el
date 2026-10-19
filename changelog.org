@@ -8,6 +8,16 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+** Changed
+- =C-c C-o= opens what point is on, the same way in the ticket view and on a board: a link the way Org opens it, a ticket key as that ticket, a comment or reply as itself (a heading in its body included), anything else in a ticket as the ticket, and the rest of a board as the board. =C-c C-y= copies the same URL. Both keys keep working during an edit session
+
+** Removed
+- =C-c M-o= and =C-c M-y= on the board. =C-c C-o= and =C-c C-y= on the board title or a column heading open and copy the board URL
+- =go-jira-view-mode-open-browser=, =go-jira-view-mode-copy-url=, =go-jira-board-browse-issue-url=, =go-jira-board-view-open-browser=, =go-jira-board-view-copy-issue-url= and =go-jira-board-view-copy-url=, replaced by =go-jira-open-at-point= and =go-jira-copy-url-at-point=
+
+** Technical
+- New module =go-jira-url.el=. A package manager that links each file into its build directory, such as elpaca, needs a rebuild to pick it up
+
 * [[0.5.0]] - 2026-10-19
 
 ** Added

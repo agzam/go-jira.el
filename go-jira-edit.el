@@ -28,6 +28,7 @@
 
 (require 'go-jira-comment)
 (require 'go-jira-markup)
+(require 'go-jira-url)
 (require 'cl-lib)
 (require 'org)
 (require 'json)
@@ -65,6 +66,8 @@ indicator is now shown via `header-line-format'.")
     (define-key map (kbd "C-c C-k") #'go-jira-edit-abort)
     (define-key map (kbd "C-c M-c") #'go-jira-comment-add)
     (define-key map (kbd "C-c C-r") #'go-jira-comment-reply)
+    (define-key map (kbd "C-c C-o") #'go-jira-open-at-point)
+    (define-key map (kbd "C-c C-y") #'go-jira-copy-url-at-point)
     map)
   "Keymap active in description edit overlay region.
 Inherits from org-mode-map, overrides submit and abort.")

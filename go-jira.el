@@ -36,6 +36,7 @@
 (require 'go-jira-edit)
 (require 'go-jira-status)
 (require 'go-jira-assign)
+(require 'go-jira-url)
 
 (defgroup go-jira nil
   "Emacs interface to go-jira CLI tool."
@@ -379,8 +380,8 @@ becomes SAC-28812__add_new_metadata_tap-asana"
     (define-key map (kbd "C-c M-e") #'go-jira-edit)
     (define-key map (kbd "C-c M-c") #'go-jira-comment-add)
     (define-key map (kbd "C-c C-r") #'go-jira-comment-reply)
-    (define-key map (kbd "C-c C-y") #'go-jira-view-mode-copy-url)
-    (define-key map (kbd "C-c C-o") #'go-jira-view-mode-open-browser)
+    (define-key map (kbd "C-c C-y") #'go-jira-copy-url-at-point)
+    (define-key map (kbd "C-c C-o") #'go-jira-open-at-point)
     (define-key map (kbd "C-c M-r") #'go-jira-view-mode-refresh)
     (define-key map (kbd "C-c C-s") #'go-jira-change-status)
     (define-key map (kbd "C-c C-a") #'go-jira-assign)
@@ -401,19 +402,6 @@ becomes SAC-28812__add_new_metadata_tap-asana"
   ;; Colorize issue keys by status (append so it wins over Org heading faces)
   (font-lock-add-keywords nil
    '((go-jira--fontify-status-keys)) t))
-
-(defun go-jira-view-mode-open-browser ()
-  "Open ticket in browser from jira view mode."
-  (interactive)
-  (when-let ((ticket (buffer-local-value 'go-jira--ticket-number (current-buffer))))
-    (browse-url (go-jira-ticket->url ticket))))
-
-(defun go-jira-view-mode-copy-url ()
-  "Copy URL for ticket in current buffer."
-  (interactive)
-  (when-let ((ticket (buffer-local-value 'go-jira--ticket-number (current-buffer))))
-    (kill-new (go-jira-ticket->url ticket))
-    (message "Copied URL for %s" ticket)))
 
 (defun go-jira-view-mode-refresh ()
   "Refresh the current ticket view."

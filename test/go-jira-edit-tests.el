@@ -744,5 +744,13 @@ SAC-999
       (expect (go-jira-edit--has-changes-p) :to-be-truthy)
       (kill-buffer))))
 
+(describe "go-jira-edit-mode-map"
+  (it "keeps C-c C-o and C-c C-y on the Jira commands during an edit session"
+    ;; The edit map is a minor-mode map, so it shadows the major-mode map.
+    (expect (lookup-key go-jira-edit-mode-map (kbd "C-c C-o"))
+            :to-be 'go-jira-open-at-point)
+    (expect (lookup-key go-jira-edit-mode-map (kbd "C-c C-y"))
+            :to-be 'go-jira-copy-url-at-point)))
+
 (provide 'go-jira-edit-tests)
 ;;; go-jira-edit-tests.el ends here
