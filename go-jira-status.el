@@ -25,13 +25,13 @@
 
 (require 'consult)
 (require 'json)
+(require 'org)
 
 (declare-function go-jira--find-exe "go-jira")
 (declare-function go-jira--ticket-arg-or-ticket-at-point "go-jira")
 (declare-function go-jira-view-ticket "go-jira")
 (declare-function go-jira-board-refresh "go-jira-board")
 (declare-function go-jira-eldoc--cache-invalidate "go-jira-eldoc")
-(declare-function org-entry-properties "org")
 
 (defvar go-jira--ticket-number)
 
@@ -154,10 +154,11 @@ Signals an error on failure, returns non-nil on success."
 (defun go-jira--current-ticket ()
   "Resolve the Jira issue key for the current context, or nil.
 Prefers the buffer-local ticket of a view buffer, then the ISSUE_KEY
-property of the Org entry at point, then a ticket symbol at point."
+property of the Org entry at point or of an entry it sits under, then a
+ticket symbol at point."
   (or (bound-and-true-p go-jira--ticket-number)
       (and (derived-mode-p 'org-mode)
-           (cdr (assoc "ISSUE_KEY" (org-entry-properties))))
+           (org-entry-get nil "ISSUE_KEY" t))
       (go-jira--ticket-arg-or-ticket-at-point)))
 
 (defun go-jira--refresh-after-transition (key)

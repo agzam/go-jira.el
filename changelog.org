@@ -15,6 +15,9 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 - =C-c M-o= and =C-c M-y= on the board. =C-c C-o= and =C-c C-y= on the board title or a column heading open and copy the board URL
 - =go-jira-view-mode-open-browser=, =go-jira-view-mode-copy-url=, =go-jira-board-browse-issue-url=, =go-jira-board-view-open-browser=, =go-jira-board-view-copy-issue-url= and =go-jira-board-view-copy-url=, replaced by =go-jira-open-at-point= and =go-jira-copy-url-at-point=
 
+** Fixed
+- =RET=, =C-c C-s= and =C-c C-a= on a board find the ticket from anywhere inside it, its comments included. Below the ticket heading =RET= used to do nothing, and the status and assignee prompts offered whatever ticket key was on the kill ring
+
 ** Technical
 - New module =go-jira-url.el=. A package manager that links each file into its build directory, such as elpaca, needs a rebuild to pick it up
 

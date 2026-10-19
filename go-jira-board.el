@@ -698,10 +698,9 @@ in the background, and fills in real content when the response arrives."
    '((go-jira--fontify-status-keys)) t))
 
 (defun go-jira-board-view-issue ()
-  "View the Jira issue at point."
+  "View the Jira issue point is in, from its heading or anywhere below it."
   (interactive)
-  (when-let* ((props (org-entry-properties))
-              (key (cdr (assoc "ISSUE_KEY" props))))
+  (when-let* ((key (org-entry-get nil "ISSUE_KEY" t)))
     (go-jira-view-ticket key)))
 
 (defun go-jira-board-view--board-url ()

@@ -260,6 +260,31 @@
       (expect (plist-get board-data :active-sprint-ids) :to-equal '(16727 16963))
       (expect (length (plist-get board-data :columns)) :to-equal 2))))
 
+(describe "go-jira-board-view-issue"
+  (before-each
+    (spy-on 'go-jira-view-ticket))
+
+  (it "views the ticket from inside one of its comments"
+    (with-temp-buffer
+      (insert "* To Do\n"
+              "** SAC-4242: A ticket\n:PROPERTIES:\n:ISSUE_KEY: SAC-4242\n:END:\n"
+              "*** Comments\n"
+              "**** Jane Roe - 2026-10-19 Mon 10:00\n"
+              ":PROPERTIES:\n:JIRA_COMMENT_ID: 1\n:END:\n"
+              "A comment body.\n")
+      (org-mode)
+      (search-backward "A comment body")
+      (go-jira-board-view-issue)
+      (expect 'go-jira-view-ticket :to-have-been-called-with "SAC-4242")))
+
+  (it "does nothing on a column heading"
+    (with-temp-buffer
+      (insert "* To Do\n")
+      (org-mode)
+      (goto-char (point-min))
+      (go-jira-board-view-issue)
+      (expect 'go-jira-view-ticket :not :to-have-been-called))))
+
 ;;; Tests: URL functions for board view
 
 (defconst go-jira-board-test--buffer-content
