@@ -13,7 +13,7 @@
 
 ;;; Commentary:
 
-;; Assignee switching for go-jira.
+;; Assignee switching and assignee initials badges for go-jira.
 ;;
 ;; The users assignable to an issue are permission- and project-specific, so
 ;; they are fetched per-issue from Jira.  The picker offers "Assign to me"
@@ -22,9 +22,11 @@
 
 ;;; Code:
 
+(require 'color)
 (require 'consult)
 (require 'json)
 (require 'seq)
+(require 'svg)
 
 (declare-function go-jira--find-exe "go-jira")
 (declare-function go-jira-view-ticket "go-jira")
@@ -154,6 +156,59 @@ display name.  Each display string maps in TABLE to an action plist with
         (puthash display (list :account-id (plist-get u :account-id) :label name) table)
         (push display candidates)))
     (nreverse candidates)))
+
+;;; Badges
+
+(defun go-jira--initials (name)
+  "Return the upcased first letters of the first and last words of NAME.
+Return nil when NAME has no letters."
+  (when-let* ((words (split-string (or name "") "[^[:alpha:]]+" t)))
+    (upcase (concat (substring (car words) 0 1)
+                    (when (cdr words) (substring (car (last words)) 0 1))))))
+
+(defun go-jira--assignee-color (name)
+  "Return a background color for assignee NAME, the same in every session.
+The name picks the hue.  The CIELAB lightness is fixed, so white initials
+read equally well on every hue."
+  ;; md5, because `sxhash-equal' values may change between Emacs versions.
+  (let* ((hue (degrees-to-radians
+               (mod (string-to-number (substring (md5 name nil nil 'utf-8) 0 6) 16)
+                    360)))
+         (rgb (color-lab-to-srgb 50 (* 45 (cos hue)) (* 45 (sin hue)))))
+    (apply #'color-rgb-to-hex (append (mapcar #'color-clamp rgb) '(2)))))
+
+(defun go-jira--assignee-badge (name)
+  "Return the initials of assignee NAME as a rounded SVG label, or nil.
+Text terminals and Emacs builds without SVG support get nil.  The sizes
+follow the default font, so the label fits inside the heading line."
+  (when-let* (((display-graphic-p))
+              ((image-type-available-p 'svg))
+              (initials (go-jira--initials name)))
+    (let* ((ch (frame-char-height))
+           (h (round (* 0.8 ch)))
+           (font-size (round (* 0.55 ch)))
+           (pad (round (* 0.3 ch)))
+           ;; 0.62 em approximates the advance width of a monospace glyph.
+           (w (+ (* 2 pad) (* (length initials) (ceiling (* 0.62 font-size)))))
+           (svg (svg-create w h)))
+      (svg-rectangle svg 0 0 w h :rx 4 :fill (go-jira--assignee-color name))
+      ;; y is the text baseline; 0.36 em below the middle centers capitals.
+      (svg-text svg initials
+                :x (/ w 2.0) :y (+ (/ h 2.0) (* 0.36 font-size))
+                :text-anchor "middle" :font-size font-size :font-weight "bold"
+                :font-family (face-attribute 'default :family) :fill "white")
+      (propertize initials
+                  'display (svg-image svg :ascent 'center)
+                  'help-echo name))))
+
+(defun go-jira--put-assignee-badge (beg end name)
+  "Display the badge of assignee NAME right after the text from BEG to END.
+An overlay holds the badge, so the heading text, which `go-jira-edit' sends
+back as the summary, stays clean.  Erasing that text deletes the overlay."
+  (when-let* ((badge (go-jira--assignee-badge name)))
+    (let ((ov (make-overlay beg end)))
+      (overlay-put ov 'evaporate t)
+      (overlay-put ov 'after-string (concat badge " ")))))
 
 ;;; Context
 
