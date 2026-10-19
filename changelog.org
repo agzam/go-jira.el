@@ -8,6 +8,8 @@ and this project adheres to [[https://semver.org/spec/v2.0.0.html][Semantic Vers
 
 * [[Unreleased]]
 
+* [[0.5.0]] - 2026-10-19
+
 ** Added
 - =go-jira-embark-copy-ticket-url=: resolves the browse URL of the ticket at
   point, puts it on the kill ring and echoes the URL alone. Reachable from
