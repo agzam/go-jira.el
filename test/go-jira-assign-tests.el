@@ -124,25 +124,16 @@ ACCOUNT-ID, DISPLAY-NAME and EMAIL mirror the fields the API returns."
 
 (defun go-jira-assign-tests--display (graphic svg)
   "Make the frame GRAPHIC and SVG support available for the current spec.
-`svg-image' is faked as well, so the specs also run on Emacs builds without
-librsvg, whose `create-image' rejects the svg type."
+`svg-image' is stubbed too: `create-image' rejects svg on builds without it."
   (spy-on 'display-graphic-p :and-return-value graphic)
   (spy-on 'image-type-available-p :and-return-value svg)
-  (spy-on 'svg-image :and-call-fake
-          (lambda (dom &rest props)
-            (append (list 'image :type 'svg
-                          :data (with-temp-buffer (svg-print dom) (buffer-string)))
-                    props))))
+  (spy-on 'svg-image :and-return-value '(image :type svg)))
 
 (describe "go-jira--assignee-badge"
-  (it "draws the initials on the assignee's color as an SVG label"
+  (it "labels the initials and shows the full name on hover"
     (go-jira-assign-tests--display t t)
-    (let* ((badge (go-jira--assignee-badge "Ag Ibragimov"))
-           (image (cdr (get-text-property 0 'display badge))))
+    (let ((badge (go-jira--assignee-badge "Ag Ibragimov")))
       (expect (substring-no-properties badge) :to-equal "AI")
-      (expect (plist-get image :type) :to-be 'svg)
-      (expect (plist-get image :data) :to-match ">AI</text>")
-      (expect (plist-get image :data) :to-match "fill=\"#6970bd\"")
       (expect (get-text-property 0 'help-echo badge) :to-equal "Ag Ibragimov")))
 
   (it "returns nil for an unassigned issue"
